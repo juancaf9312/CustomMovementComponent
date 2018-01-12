@@ -10,14 +10,19 @@
 #include "HeadMountedDisplayFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
 #include "MotionControllerComponent.h"
+#include "HynmersMovementComponent.h"
+
 
 DEFINE_LOG_CATEGORY_STATIC(LogFPChar, Warning, All);
 
 //////////////////////////////////////////////////////////////////////////
 // AMovementComponentCharacter
 
-AMovementComponentCharacter::AMovementComponentCharacter()
+AMovementComponentCharacter::AMovementComponentCharacter(const FObjectInitializer& ObjectInitializer):
+	Super(ObjectInitializer.SetDefaultSubobjectClass<UHynmersMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
+
+
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(55.f, 96.0f);
 
