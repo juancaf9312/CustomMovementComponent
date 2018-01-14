@@ -22,5 +22,12 @@ public:
 
 	virtual void PerformMovement(float DeltaSeconds) override;
 
-	virtual void ApplyDownwardForce(float DeltaSeconds) override;
+	//Movements
+	virtual void PhysWalking(float deltaTime, int32 Iterations) override;
+
+	virtual void PhysSwimming(float deltaTime, int32 Iterations) override;
+
+	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
+
+	virtual bool DoJump(bool bReplayingMoves) override;
 };

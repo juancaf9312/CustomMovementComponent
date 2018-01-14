@@ -13,34 +13,13 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/NetworkObjectList.h"
 
-
 DECLARE_CYCLE_STAT(TEXT("Char Tick"), STAT_CharacterMovementTick, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char NonSimulated Time"), STAT_CharacterMovementNonSimulated, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char Simulated Time"), STAT_CharacterMovementSimulated, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char PerformMovement"), STAT_CharacterMovementPerformMovement, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char ReplicateMoveToServer"), STAT_CharacterMovementReplicateMoveToServer, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char CallServerMove"), STAT_CharacterMovementCallServerMove, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char RootMotionSource Calculate"), STAT_CharacterMovementRootMotionSourceCalculate, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char RootMotionSource Apply"), STAT_CharacterMovementRootMotionSourceApply, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char ClientUpdatePositionAfterServerUpdate"), STAT_CharacterMovementClientUpdatePositionAfterServerUpdate, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char CombineNetMove"), STAT_CharacterMovementCombineNetMove, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char NetSmoothCorrection"), STAT_CharacterMovementSmoothCorrection, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char SmoothClientPosition"), STAT_CharacterMovementSmoothClientPosition, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char SmoothClientPosition_Interp"), STAT_CharacterMovementSmoothClientPosition_Interp, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char SmoothClientPosition_Visual"), STAT_CharacterMovementSmoothClientPosition_Visual, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char Physics Interation"), STAT_CharPhysicsInteraction, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char StepUp"), STAT_CharStepUp, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char FindFloor"), STAT_CharFindFloor, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char AdjustFloorHeight"), STAT_CharAdjustFloorHeight, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char Update Acceleration"), STAT_CharUpdateAcceleration, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char MoveUpdateDelegate"), STAT_CharMoveUpdateDelegate, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char PhysWalking"), STAT_CharPhysWalking, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char PhysFalling"), STAT_CharPhysFalling, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char PhysNavWalking"), STAT_CharPhysNavWalking, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char NavProjectPoint"), STAT_CharNavProjectPoint, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char NavProjectLocation"), STAT_CharNavProjectLocation, STATGROUP_Character);
-
-
+DECLARE_CYCLE_STAT(TEXT("Char Physics Interation"), STAT_CharPhysicsInteraction, STATGROUP_Character);
 
 UHynmersMovementComponent::UHynmersMovementComponent() 
 {
@@ -231,7 +210,7 @@ void UHynmersMovementComponent::TickComponent(float DeltaTime, enum ELevelTick T
 				PerformMovement(DeltaTime);
 			}
 		}
-		
+
 	}
 
 	if (bUseRVOAvoidance)
@@ -245,7 +224,6 @@ void UHynmersMovementComponent::TickComponent(float DeltaTime, enum ELevelTick T
 		ApplyDownwardForce(DeltaTime);
 		ApplyRepulsionForce(DeltaTime);
 	}
-
 }
 
 void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
@@ -260,8 +238,10 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 	// no movement if we can't move, or if currently doing physical simulation on UpdatedComponent
 	if (MovementMode == MOVE_None || UpdatedComponent->Mobility != EComponentMobility::Movable || UpdatedComponent->IsSimulatingPhysics())
 	{
+		UE_LOG(LogTemp, Warning, TEXT("MovementMode == MOVE_None || UpdatedComponent->Mobility != EComponentMobility::Movable || UpdatedComponent->IsSimulatingPhysics()"))
 		if (!CharacterOwner->bClientUpdating && CharacterOwner->IsPlayingRootMotion() && CharacterOwner->GetMesh() && !CharacterOwner->bServerMoveIgnoreRootMotion)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("!CharacterOwner->bClientUpdating && CharacterOwner->IsPlayingRootMotion() && CharacterOwner->GetMesh() && !CharacterOwner->bServerMoveIgnoreRootMotion"))
 			// Consume root motion
 			TickCharacterPose(DeltaSeconds);
 			RootMotionParams.Clear();
@@ -278,6 +258,8 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 	// Update saved LastPreAdditiveVelocity with any external changes to character Velocity that happened since last update.
 	if (CurrentRootMotion.HasAdditiveVelocity())
 	{
+		UE_LOG(LogTemp, Warning, TEXT("CurrentRootMotion.HasAdditiveVelocity()"))
+
 		const FVector Adjustment = (Velocity - LastUpdateVelocity);
 		CurrentRootMotion.LastPreAdditiveVelocity += Adjustment;
 
@@ -310,6 +292,8 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 		const bool bHasRootMotionSources = HasRootMotionSources();
 		if (bHasRootMotionSources && !CharacterOwner->bClientUpdating && !CharacterOwner->bServerMoveIgnoreRootMotion)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("bHasRootMotionSources && !CharacterOwner->bClientUpdating && !CharacterOwner->bServerMoveIgnoreRootMotion"))
+
 			SCOPE_CYCLE_COUNTER(STAT_CharacterMovementRootMotionSourceCalculate);
 
 			const FVector VelocityBeforeCleanup = Velocity;
@@ -337,11 +321,6 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 		// Update the character state before we do our movement
 		UpdateCharacterStateBeforeMovement();
 
-		if (MovementMode == MOVE_NavWalking && bWantsToLeaveNavWalking)
-		{
-			TryToLeaveNavWalking();
-		}
-
 		// Character::LaunchCharacter() has been deferred until now.
 		HandlePendingLaunch();
 		ClearAccumulatedForces();
@@ -362,6 +341,8 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 		// Update saved LastPreAdditiveVelocity with any external changes to character Velocity that happened due to ApplyAccumulatedForces/HandlePendingLaunch
 		if (CurrentRootMotion.HasAdditiveVelocity())
 		{
+			UE_LOG(LogTemp, Warning, TEXT("CurrentRootMotion.HasAdditiveVelocity()"))
+
 			const FVector Adjustment = (Velocity - OldVelocity);
 			CurrentRootMotion.LastPreAdditiveVelocity += Adjustment;
 
@@ -381,20 +362,28 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 		// Prepare Root Motion (generate/accumulate from root motion sources to be used later)
 		if (bHasRootMotionSources && !CharacterOwner->bClientUpdating && !CharacterOwner->bServerMoveIgnoreRootMotion)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("bHasRootMotionSources && !CharacterOwner->bClientUpdating && !CharacterOwner->bServerMoveIgnoreRootMotion"))
+
 			// Animation root motion - If using animation RootMotion, tick animations before running physics.
 			if (CharacterOwner->IsPlayingRootMotion() && CharacterOwner->GetMesh())
 			{
+				UE_LOG(LogTemp, Warning, TEXT("CharacterOwner->IsPlayingRootMotion() && CharacterOwner->GetMesh()"))
+
 				TickCharacterPose(DeltaSeconds);
 
 				// Make sure animation didn't trigger an event that destroyed us
 				if (!HasValidData())
 				{
+					UE_LOG(LogTemp, Warning, TEXT("!HasValidData()"))
+
 					return;
 				}
 
 				// For local human clients, save off root motion data so it can be used by movement networking code.
 				if (CharacterOwner->IsLocallyControlled() && (CharacterOwner->Role == ROLE_AutonomousProxy) && CharacterOwner->IsPlayingNetworkedRootMotionMontage())
 				{
+					UE_LOG(LogTemp, Warning, TEXT("CharacterOwner->IsLocallyControlled() && (CharacterOwner->Role == ROLE_AutonomousProxy) && CharacterOwner->IsPlayingNetworkedRootMotionMontage()"))
+
 					CharacterOwner->ClientRootMotionParams = RootMotionParams;
 				}
 			}
@@ -408,6 +397,8 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 			// For local human clients, save off root motion data so it can be used by movement networking code.
 			if (CharacterOwner->IsLocallyControlled() && (CharacterOwner->Role == ROLE_AutonomousProxy))
 			{
+				UE_LOG(LogTemp, Warning, TEXT("CharacterOwner->IsLocallyControlled() && (CharacterOwner->Role == ROLE_AutonomousProxy)"))
+
 				CharacterOwner->SavedRootMotion = CurrentRootMotion;
 			}
 		}
@@ -415,13 +406,19 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 		// Apply Root Motion to Velocity
 		if (CurrentRootMotion.HasOverrideVelocity() || HasAnimRootMotion())
 		{
+			UE_LOG(LogTemp, Warning, TEXT("CurrentRootMotion.HasOverrideVelocity() || HasAnimRootMotion()"))
+
 			// Animation root motion overrides Velocity and currently doesn't allow any other root motion sources
 			if (HasAnimRootMotion())
 			{
+				UE_LOG(LogTemp, Warning, TEXT("HasAnimRootMotion()"))
+
 				// Convert to world space (animation root motion is always local)
 				USkeletalMeshComponent * SkelMeshComp = CharacterOwner->GetMesh();
 				if (SkelMeshComp)
 				{
+					UE_LOG(LogTemp, Warning, TEXT("SkelMeshComp"))
+
 					// Convert Local Space Root Motion to world space. Do it right before used by physics to make sure we use up to date transforms, as translation is relative to rotation.
 					RootMotionParams.Set(SkelMeshComp->ConvertLocalRootMotionToWorld(RootMotionParams.GetRootMotionTransform()));
 				}
@@ -433,7 +430,7 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 					Velocity = ConstrainAnimRootMotionVelocity(AnimRootMotionVelocity, Velocity);
 				}
 
-				UE_LOG(LogRootMotion, Log, TEXT("PerformMovement WorldSpaceRootMotion Translation: %s, Rotation: %s, Actor Facing: %s, Velocity: %s")
+				UE_LOG(LogTemp, Warning, TEXT("PerformMovement WorldSpaceRootMotion Translation: %s, Rotation: %s, Actor Facing: %s, Velocity: %s")
 					, *RootMotionParams.GetRootMotionTransform().GetTranslation().ToCompactString()
 					, *RootMotionParams.GetRootMotionTransform().GetRotation().Rotator().ToCompactString()
 					, *CharacterOwner->GetActorForwardVector().ToCompactString()
@@ -501,17 +498,21 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 		// Apply Root Motion rotation after movement is complete.
 		if (HasAnimRootMotion())
 		{
+			UE_LOG(LogTemp, Warning, TEXT("HasAnimRootMotion"))
+
 			const FQuat OldActorRotationQuat = UpdatedComponent->GetComponentQuat();
 			const FQuat RootMotionRotationQuat = RootMotionParams.GetRootMotionTransform().GetRotation();
 			if (!RootMotionRotationQuat.IsIdentity())
 			{
+				UE_LOG(LogTemp, Warning, TEXT("!RootMotionRotationQuat.IsIdentity()"))
+
 				const FQuat NewActorRotationQuat = RootMotionRotationQuat * OldActorRotationQuat;
 				MoveUpdatedComponent(FVector::ZeroVector, NewActorRotationQuat, true);
 			}
 
 #if !(UE_BUILD_SHIPPING)
 			// debug
-			if (false)
+			if (true)
 			{
 				const FRotator OldActorRotation = OldActorRotationQuat.Rotator();
 				const FVector ResultingLocation = UpdatedComponent->GetComponentLocation();
@@ -561,12 +562,18 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 			UNetDriver* NetDriver = MyWorld->GetNetDriver();
 			if (NetDriver && NetDriver->IsServer())
 			{
+				UE_LOG(LogTemp, Warning, TEXT("NetDriver && NetDriver->IsServer()"))
+
 				FNetworkObjectInfo* NetActor = NetDriver->GetNetworkObjectInfo(CharacterOwner);
 
 				if (NetActor && MyWorld->GetTimeSeconds() <= NetActor->NextUpdateTime && NetDriver->IsNetworkActorUpdateFrequencyThrottled(*NetActor))
 				{
+					UE_LOG(LogTemp, Warning, TEXT("NetActor && MyWorld->GetTimeSeconds() <= NetActor->NextUpdateTime"))
+
 					if (ShouldCancelAdaptiveReplication())
 					{
+						UE_LOG(LogTemp, Warning, TEXT("ShouldCancelAdaptiveReplication"))
+
 						NetDriver->CancelAdaptiveReplication(*NetActor);
 					}
 				}
@@ -593,16 +600,30 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 	LastUpdateVelocity = Velocity;
 }
 
-void UHynmersMovementComponent::ApplyDownwardForce(float DeltaSeconds)
+void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 {
-	if (StandingDownwardForceScale != 0.0f && CurrentFloor.HitResult.IsValidBlockingHit())
-	{
-		UPrimitiveComponent* BaseComp = CurrentFloor.HitResult.GetComponent();
-		const FVector Gravity = FVector(0.0f, 0.0f, GetGravityZ());
+}
 
-		if (BaseComp && BaseComp->IsAnySimulatingPhysics() && !Gravity.IsZero())
-		{
-			BaseComp->AddForceAtLocation(Gravity * Mass * StandingDownwardForceScale, CurrentFloor.HitResult.ImpactPoint, CurrentFloor.HitResult.BoneName);
-		}
-	}
+void UHynmersMovementComponent::PhysSwimming(float deltaTime, int32 Iterations)
+{
+}
+
+void UHynmersMovementComponent::PhysFalling(float deltaTime, int32 Iterations)
+{
+}
+
+bool UHynmersMovementComponent::DoJump(bool bReplayingMoves)
+{
+	//if (CharacterOwner && CharacterOwner->CanJump())
+	//{
+	//	// Don't jump if we can't move up/down.
+	//	if (!bConstrainToPlane || FMath::Abs(PlaneConstraintNormal.Z) != 1.f)
+	//	{
+	//		Velocity.Z = JumpZVelocity;
+	//		SetMovementMode(MOVE_Falling);
+	//		return true;
+	//	}
+	//}
+
+	return false;
 }
