@@ -287,7 +287,7 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 	{
 		FScopedMovementUpdate ScopedMovementUpdate(UpdatedComponent, bEnableScopedMovementUpdates ? EScopedUpdate::DeferredUpdates : EScopedUpdate::ImmediateUpdates);
 
-		MaybeUpdateBasedMovement(DeltaSeconds);
+		//MaybeUpdateBasedMovement(DeltaSeconds);
 
 		// Clean up invalid RootMotion Sources.
 		// This includes RootMotion sources that ended naturally.
@@ -604,6 +604,8 @@ void UHynmersMovementComponent::PerformMovement(float DeltaSeconds)
 	LastUpdateVelocity = Velocity;
 }
 
+
+
 void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 {
 	SCOPE_CYCLE_COUNTER(STAT_CharPhysWalking);
@@ -648,7 +650,8 @@ void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 		const FVector OldLocation = UpdatedComponent->GetComponentLocation();
 		const FFindFloorResult OldFloor = CurrentFloor;
 
-		RestorePreAdditiveRootMotionVelocity();
+		// Root motion is not updated. All is false
+		//RestorePreAdditiveRootMotionVelocity();
 
 		// Ensure velocity is horizontal.
 		MaintainHorizontalGroundVelocity();
@@ -658,6 +661,7 @@ void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 		// Apply acceleration
 		if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
 		{
+			// Funciron importante para calcular la velocidad
 			CalcVelocity(timeTick, GroundFriction, false, GetMaxBrakingDeceleration());
 			checkCode(ensureMsgf(!Velocity.ContainsNaN(), TEXT("PhysWalking: Velocity contains NaN after CalcVelocity (%s)\n%s"), *GetPathNameSafe(this), *Velocity.ToString()));
 		}

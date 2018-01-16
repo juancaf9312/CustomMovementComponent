@@ -8,6 +8,10 @@ public class MovementComponent : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "HeadMountedDisplay" });
-	}
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "HeadMountedDisplay", "OculusHMD" });
+
+        PublicIncludePathModuleNames.AddRange(new string[] { "OculusHMD" });
+
+        PublicIncludePaths.AddRange(new string[] { "OculusHMD/Public" });
+    }
 }
