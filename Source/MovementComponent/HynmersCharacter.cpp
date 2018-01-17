@@ -115,7 +115,7 @@ void AHynmersCharacter::MoveForward(float Value)
 	if (Value != 0.0f)
 	{
 		// add movement in that direction
-		AddMovementInput(GetActorForwardVector(), Value);
+		AddMovementInput(GetRootComponent()->GetForwardVector(), Value);
 	}
 }
 
@@ -124,7 +124,7 @@ void AHynmersCharacter::MoveRight(float Value)
 	if (Value != 0.0f)
 	{
 		// add movement in that direction
-		AddMovementInput(GetActorRightVector(), Value);
+		AddMovementInput(GetRootComponent()->GetRightVector(), Value);
 	}
 }
 
