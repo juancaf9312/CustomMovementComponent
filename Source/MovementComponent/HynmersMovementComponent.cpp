@@ -19,7 +19,7 @@ DECLARE_CYCLE_STAT(TEXT("Char PerformMovement"), STAT_CharacterMovementPerformMo
 DECLARE_CYCLE_STAT(TEXT("Char RootMotionSource Calculate"), STAT_CharacterMovementRootMotionSourceCalculate, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char RootMotionSource Apply"), STAT_CharacterMovementRootMotionSourceApply, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char Update Acceleration"), STAT_CharUpdateAcceleration, STATGROUP_Character);
-DECLARE_CYCLE_STAT(TEXT("Char Physics Interation"), STAT_CharPhysicsInteraction, STATGROUP_Character);
+DECLARE_CYCLE_STAT(TEXT("Ch MoveAloar Physics Interation"), STAT_CharPhysicsInteraction, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char PhysWalking"), STAT_CharPhysWalking, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char PhysFalling"), STAT_CharPhysFalling, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char FindFloor"), STAT_CharFindFloor, STATGROUP_Character);
@@ -180,7 +180,7 @@ void UHynmersMovementComponent::TickComponent(float DeltaTime, enum ELevelTick T
 	const FVector InputVector = ConsumeInputVector();
 	UpVector = CharacterOwner->GetRootComponent()->GetUpVector();
 
-	//UE_LOG(LogTemp, Warning, TEXT("Current floor normal: %s\nIs walkable: %d"), *CurrentFloor.HitResult.ImpactNormal.ToString(), CurrentFloor.bWalkableFloor)
+	//UE_LOG(LogTemp, Warning, TEXT("Current floor normal: %s"), *CurrentFloor.HitResult.ImpactNormal.ToString())
 
 	if (!HasValidData() || ShouldSkipUpdate(DeltaTime))
 	{
@@ -928,6 +928,32 @@ void UHynmersMovementComponent::MaintainHorizontalGroundVelocity()
 		Velocity -= (Velocity | UpVector)*UpVector;
 
 	}
+}
+
+FVector UHynmersMovementComponent::ComputeGroundMovementDelta(const FVector & Delta, const FHitResult & RampHit, const bool bHitFromLineTrace) const
+{
+	const FVector FloorNormal = RampHit.ImpactNormal;
+	const FVector ContactNormal = RampHit.Normal;
+
+	if ((FloorNormal | UpVector) < (1.f - KINDA_SMALL_NUMBER) && (FloorNormal | UpVector) > KINDA_SMALL_NUMBER && (ContactNormal | UpVector) > KINDA_SMALL_NUMBER && !bHitFromLineTrace && IsWalkable(RampHit))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("GroundMovementDelta: %s"), *Velocity.ToString());
+
+		// Compute a vector that moves parallel to the surface, by projecting the horizontal movement direction onto the ramp.
+		const float FloorDotDelta = (FloorNormal | Delta);
+		FVector RampMovement(Delta.X, Delta.Y, -FloorDotDelta / FloorNormal.Z);
+
+		if (bMaintainHorizontalGroundVelocity)
+		{
+			return RampMovement;
+		}
+		else
+		{
+			return RampMovement.GetSafeNormal() * Delta.Size();
+		}
+	}
+
+	return Delta;
 }
 
 void UHynmersMovementComponent::PhysSwimming(float deltaTime, int32 Iterations)

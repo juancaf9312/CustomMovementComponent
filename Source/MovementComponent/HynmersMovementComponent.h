@@ -40,6 +40,9 @@ public:
 	// Function that clamps velocity in Z
 	virtual void MaintainHorizontalGroundVelocity() override;
 
+	virtual FVector ComputeGroundMovementDelta(const FVector& Delta, const FHitResult& RampHit, const bool bHitFromLineTrace) const;
+
+
 	virtual void PhysSwimming(float deltaTime, int32 Iterations) override;
 
 	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
