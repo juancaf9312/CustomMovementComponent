@@ -7,19 +7,20 @@
 #include "HynmersMovementComponent.generated.h"
 
 /*
-  Revision:
-	TickComponent
-		PerformMovement
-			PhysWalking
-				MoveAlongthefloor
-					Ramp
-
+ * 
  */
 UCLASS()
 class MOVEMENTCOMPONENT_API UHynmersMovementComponent : public UCharacterMovementComponent
 {
 	GENERATED_BODY()
 
+/*Revision:
+	TickComponent
+		PerformMovement
+			PhysWalking
+				MoveAlongfloor
+					HandleImpact
+*/
 public:
 
 	UHynmersMovementComponent();

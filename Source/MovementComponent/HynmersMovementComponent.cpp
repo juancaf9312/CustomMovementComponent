@@ -171,7 +171,6 @@ UHynmersMovementComponent::UHynmersMovementComponent()
 	NavWalkingFloorDistTolerance = 10.0f;
 }
 
-
 void UHynmersMovementComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) 
 {
 	SCOPED_NAMED_EVENT(UCharacterMovementComponent_TickComponent, FColor::Yellow);
@@ -824,7 +823,7 @@ void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 				Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / timeTick;
 			}
 		}
-		UE_LOG(LogTemp, Warning, TEXT("Velocity after: %s"), *Velocity.ToString());
+		//UE_LOG(LogTemp, Warning, TEXT("Velocity after: %s"), *Velocity.ToString());
 		// If we didn't move at all this iteration then abort (since future iterations will also be stuck).
 		if (UpdatedComponent->GetComponentLocation() == OldLocation)
 		{
@@ -849,8 +848,7 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 	// Move along the current floor
 	// Have to changed  to avoid z clamping. Have to make UpVector Clamping
 	const FVector Delta = (InVelocity - (InVelocity | UpVector)*UpVector) * DeltaSeconds;
-	// end
-	UE_LOG(LogTemp, Warning, TEXT("Velocity before: %s"), *Velocity.ToString());
+
 	FHitResult Hit(1.f);
 	FVector RampVector = ComputeGroundMovementDelta(Delta, CurrentFloor.HitResult, CurrentFloor.bLineTrace);
 	SafeMoveUpdatedComponent(RampVector, UpdatedComponent->GetComponentQuat(), true, Hit);
@@ -859,6 +857,7 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 
 	if (Hit.bStartPenetrating)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("bStartPenetrating = %d"), Hit.bStartPenetrating);
 		// Allow this hit to be used as an impact we can deflect off, otherwise we do nothing the rest of the update and appear to hitch.
 		HandleImpact(Hit);
 		SlideAlongSurface(Delta, 1.f, Hit.Normal, Hit, true);
@@ -870,6 +869,8 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 	}
 	else if (Hit.IsValidBlockingHit())
 	{
+		UE_LOG(LogTemp, Warning, TEXT("IsValidBlockingHit"));
+
 		// We impacted something (most likely another ramp, but possibly a barrier).
 		float PercentTimeApplied = Hit.Time;
 		if ((Hit.Time > 0.f) && (Hit.Normal.Z > KINDA_SMALL_NUMBER) && IsWalkable(Hit))
@@ -960,7 +961,6 @@ FVector UHynmersMovementComponent::ComputeGroundMovementDelta(const FVector & De
 
 bool UHynmersMovementComponent::SafeMoveUpdatedComponent(const FVector& Delta, const FQuat& NewRotation, bool bSweep, FHitResult& OutHit, ETeleportType Teleport)
 {
-	UE_LOG(LogTemp, Warning, TEXT("im in SafeMoveUpdatedComponent"));
 	if (UpdatedComponent == NULL)
 	{
 		OutHit.Reset(1.f);
@@ -992,7 +992,14 @@ bool UHynmersMovementComponent::SafeMoveUpdatedComponent(const FVector& Delta, c
 
 bool UHynmersMovementComponent::MoveUpdatedComponent(const FVector & Delta, const FQuat & NewRotation, bool bSweep, FHitResult * OutHit, ETeleportType Teleport)
 {
-	UE_LOG(LogTemp, Warning, TEXT("im in MoveUpdatedComponent"));
+	if (UpdatedComponent)
+	{
+		if (bConstrainToPlane)PlaneConstraintNormal = CurrentFloor.HitResult.ImpactNormal;
+
+		const FVector NewDelta = ConstrainDirectionToPlane(Delta);
+		return UpdatedComponent->MoveComponent(Delta, NewRotation, bSweep, OutHit, MoveComponentFlags, Teleport);
+	}
+
 	return false;
 }
 
@@ -1387,7 +1394,6 @@ bool UHynmersMovementComponent::DoJump(bool bReplayingMoves)
 
 	return false;
 }
-
 
 void UHynmersMovementComponent::FindFloor(const FVector & CapsuleLocation, FFindFloorResult & OutFloorResult, bool bZeroDelta, const FHitResult * DownwardSweepResult) const
 {
