@@ -763,6 +763,7 @@ void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 				remainingTime = 0.f;
 				break;
 			}
+
 		}
 		else
 		{
@@ -813,7 +814,6 @@ void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 			}
 		}
 
-
 		// Allow overlap events and such to change physics state and velocity
 		if (IsMovingOnGround())
 		{
@@ -824,7 +824,7 @@ void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 				Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / timeTick;
 			}
 		}
-
+		UE_LOG(LogTemp, Warning, TEXT("Velocity after: %s"), *Velocity.ToString());
 		// If we didn't move at all this iteration then abort (since future iterations will also be stuck).
 		if (UpdatedComponent->GetComponentLocation() == OldLocation)
 		{
@@ -854,7 +854,7 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 	FHitResult Hit(1.f);
 	FVector RampVector = ComputeGroundMovementDelta(Delta, CurrentFloor.HitResult, CurrentFloor.bLineTrace);
 	SafeMoveUpdatedComponent(RampVector, UpdatedComponent->GetComponentQuat(), true, Hit);
-	UE_LOG(LogTemp, Warning, TEXT("Velocity after: %s"), *Velocity.ToString());
+	
 	float LastMoveTimeSlice = DeltaSeconds;
 
 	if (Hit.bStartPenetrating)
@@ -938,7 +938,6 @@ FVector UHynmersMovementComponent::ComputeGroundMovementDelta(const FVector & De
 
 	if ((FloorNormal | UpVector) < (1.f - KINDA_SMALL_NUMBER) && (FloorNormal | UpVector) > KINDA_SMALL_NUMBER && (ContactNormal | UpVector) > KINDA_SMALL_NUMBER && !bHitFromLineTrace && IsWalkable(RampHit))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("GroundMovementDelta: %s"), *Velocity.ToString());
 
 		// Compute a vector that moves parallel to the surface, by projecting the horizontal movement direction onto the ramp.
 		const float FloorDotDelta = (FloorNormal | Delta);
@@ -957,6 +956,44 @@ FVector UHynmersMovementComponent::ComputeGroundMovementDelta(const FVector & De
 	}
 
 	return Delta;
+}
+
+bool UHynmersMovementComponent::SafeMoveUpdatedComponent(const FVector& Delta, const FQuat& NewRotation, bool bSweep, FHitResult& OutHit, ETeleportType Teleport)
+{
+	UE_LOG(LogTemp, Warning, TEXT("im in SafeMoveUpdatedComponent"));
+	if (UpdatedComponent == NULL)
+	{
+		OutHit.Reset(1.f);
+		return false;
+	}
+
+	bool bMoveResult = false;
+
+	// Scope for move flags
+	{
+		// Conditionally ignore blocking overlaps (based on CVar)
+		const EMoveComponentFlags IncludeBlockingOverlapsWithoutEvents = (MOVECOMP_NeverIgnoreBlockingOverlaps | MOVECOMP_DisableBlockingOverlapDispatch);
+		bMoveResult = MoveUpdatedComponent(Delta, NewRotation, bSweep, &OutHit, Teleport);
+	}
+
+	// Handle initial penetrations
+	if (OutHit.bStartPenetrating && UpdatedComponent)
+	{
+		const FVector RequestedAdjustment = GetPenetrationAdjustment(OutHit);
+		if (ResolvePenetration(RequestedAdjustment, OutHit, NewRotation))
+		{
+			// Retry original move
+			bMoveResult = MoveUpdatedComponent(Delta, NewRotation, bSweep, &OutHit, Teleport);
+		}
+	}
+
+	return bMoveResult;
+}
+
+bool UHynmersMovementComponent::MoveUpdatedComponent(const FVector & Delta, const FQuat & NewRotation, bool bSweep, FHitResult * OutHit, ETeleportType Teleport)
+{
+	UE_LOG(LogTemp, Warning, TEXT("im in MoveUpdatedComponent"));
+	return false;
 }
 
 void UHynmersMovementComponent::PhysSwimming(float deltaTime, int32 Iterations)
