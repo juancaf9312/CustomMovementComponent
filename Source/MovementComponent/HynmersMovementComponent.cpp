@@ -850,10 +850,11 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 	// Have to changed  to avoid z clamping. Have to make UpVector Clamping
 	const FVector Delta = (InVelocity - (InVelocity | UpVector)*UpVector) * DeltaSeconds;
 	// end
-	//UE_LOG(LogTemp, Warning, TEXT("Floor Normal: %s"), *CurrentFloor.HitResult.ImpactNormal.ToString());
+	UE_LOG(LogTemp, Warning, TEXT("Velocity before: %s"), *Velocity.ToString());
 	FHitResult Hit(1.f);
 	FVector RampVector = ComputeGroundMovementDelta(Delta, CurrentFloor.HitResult, CurrentFloor.bLineTrace);
 	SafeMoveUpdatedComponent(RampVector, UpdatedComponent->GetComponentQuat(), true, Hit);
+	UE_LOG(LogTemp, Warning, TEXT("Velocity after: %s"), *Velocity.ToString());
 	float LastMoveTimeSlice = DeltaSeconds;
 
 	if (Hit.bStartPenetrating)
@@ -941,7 +942,9 @@ FVector UHynmersMovementComponent::ComputeGroundMovementDelta(const FVector & De
 
 		// Compute a vector that moves parallel to the surface, by projecting the horizontal movement direction onto the ramp.
 		const float FloorDotDelta = (FloorNormal | Delta);
-		FVector RampMovement(Delta.X, Delta.Y, -FloorDotDelta / FloorNormal.Z);
+		FVector RightVector = CharacterOwner->GetRootComponent()->GetRightVector();
+		FVector ForwardVector = CharacterOwner->GetRootComponent()->GetForwardVector();
+		FVector RampMovement = (Delta | RightVector)*RightVector + (Delta | ForwardVector)*ForwardVector + (-FloorDotDelta / (FloorNormal | UpVector))*UpVector;
 
 		if (bMaintainHorizontalGroundVelocity)
 		{
