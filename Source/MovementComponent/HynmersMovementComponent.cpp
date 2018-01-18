@@ -869,8 +869,6 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 	}
 	else if (Hit.IsValidBlockingHit())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("IsValidBlockingHit"));
-
 		// We impacted something (most likely another ramp, but possibly a barrier).
 		float PercentTimeApplied = Hit.Time;
 		if ((Hit.Time > 0.f) && (Hit.Normal.Z > KINDA_SMALL_NUMBER) && IsWalkable(Hit))
@@ -890,17 +888,17 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 			if (CanStepUp(Hit) || (CharacterOwner->GetMovementBase() != NULL && CharacterOwner->GetMovementBase()->GetOwner() == Hit.GetActor()))
 			{
 				// hit a barrier, try to step up
-				const FVector GravDir(0.f, 0.f, -1.f);
+				const FVector GravDir (0.f, 0.f, -1.f);
 				if (!StepUp(GravDir, Delta * (1.f - PercentTimeApplied), Hit, OutStepDownResult))
 				{
-					//UE_LOG(LogCharacterMovement, Verbose, TEXT("- StepUp (ImpactNormal %s, Normal %s"), *Hit.ImpactNormal.ToString(), *Hit.Normal.ToString());
+					UE_LOG(LogTemp, Log, TEXT("- StepUp (ImpactNormal %s, Normal %s"), *Hit.ImpactNormal.ToString(), *Hit.Normal.ToString());
 					HandleImpact(Hit, LastMoveTimeSlice, RampVector);
 					SlideAlongSurface(Delta, 1.f - PercentTimeApplied, Hit.Normal, Hit, true);
 				}
 				else
 				{
 					// Don't recalculate velocity based on this height adjustment, if considering vertical adjustments.
-					//UE_LOG(LogCharacterMovement, Verbose, TEXT("+ StepUp (ImpactNormal %s, Normal %s"), *Hit.ImpactNormal.ToString(), *Hit.Normal.ToString());
+					UE_LOG(LogTemp, Log, TEXT("+ StepUp (ImpactNormal %s, Normal %s"), *Hit.ImpactNormal.ToString(), *Hit.Normal.ToString());
 					bJustTeleported |= !bMaintainHorizontalGroundVelocity;
 				}
 			}
