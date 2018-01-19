@@ -47,6 +47,8 @@ public:
 
 	bool MoveUpdatedComponent(const FVector& Delta, const FQuat& NewRotation, bool bSweep, FHitResult* OutHit = NULL, ETeleportType Teleport = ETeleportType::None);
 
+	virtual bool StepUp(const FVector& GravDir, const FVector& Delta, const FHitResult &Hit, struct UCharacterMovementComponent::FStepDownResult* OutStepDownResult = NULL) override;
+
 	virtual void PhysSwimming(float deltaTime, int32 Iterations) override;
 
 	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
@@ -61,7 +63,7 @@ public:
 	virtual bool FloorSweepTest(struct FHitResult& OutHit, const FVector& Start, const FVector& End, ECollisionChannel TraceChannel, const struct FCollisionShape& CollisionShape,
 		const struct FCollisionQueryParams& Params, const struct FCollisionResponseParams& ResponseParam) const override;
 
-	virtual bool IsWalkable(const FHitResult& Hit) const override { return true; };
+	virtual bool IsWalkable(const FHitResult& Hit) const override;
 
 private:
 	FVector UpVector;
