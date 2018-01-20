@@ -855,9 +855,7 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 	SafeMoveUpdatedComponent(RampVector, UpdatedComponent->GetComponentQuat(), true, Hit);
 	
 	float LastMoveTimeSlice = DeltaSeconds;
-
-	UE_LOG(LogTemp, Warning, TEXT("IsValidBlockingHit: %d\nStartPenetrating: %d"), Hit.IsValidBlockingHit(), Hit.bStartPenetrating)
-
+	
 	if (Hit.bStartPenetrating)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("bStartPenetrating = %d"), Hit.bStartPenetrating);
@@ -874,10 +872,8 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 	{
 		// We impacted something (most likely another ramp, but possibly a barrier).
 		float PercentTimeApplied = Hit.Time;
-		UE_LOG(LogTemp, Warning, TEXT("Hit time: %d"), PercentTimeApplied)
 		if ((Hit.Time > 0.f) && ((Hit.Normal | UpVector) > KINDA_SMALL_NUMBER) && IsWalkable(Hit))
 		{
-			UE_LOG(LogTemp, Warning, TEXT("It is another ramp"))
 			// Another walkable ramp.
 			const float InitialPercentRemaining = 1.f - PercentTimeApplied;
 			RampVector = ComputeGroundMovementDelta(Delta * InitialPercentRemaining, Hit, false);
@@ -886,6 +882,7 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 
 			const float SecondHitPercent = Hit.Time * InitialPercentRemaining;
 			PercentTimeApplied = FMath::Clamp(PercentTimeApplied + SecondHitPercent, 0.f, 1.f);
+
 		}
 
 		if (Hit.IsValidBlockingHit())
@@ -893,7 +890,7 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 			if (CanStepUp(Hit) || (CharacterOwner->GetMovementBase() != NULL && CharacterOwner->GetMovementBase()->GetOwner() == Hit.GetActor()))
 			{
 				// hit a barrier, try to step up
-				const FVector GravDir = -CurrentFloor.HitResult.ImpactNormal;
+				const FVector GravDir = -UpVector;
 				if (!StepUp(GravDir, Delta * (1.f - PercentTimeApplied), Hit, OutStepDownResult))
 				{
 					UE_LOG(LogTemp, Log, TEXT("- StepUp (ImpactNormal %s, Normal %s"), *Hit.ImpactNormal.ToString(), *Hit.Normal.ToString());
@@ -909,6 +906,8 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 			}
 			else if (Hit.Component.IsValid() && !Hit.Component.Get()->CanCharacterStepUp(CharacterOwner))
 			{
+				UE_LOG(LogTemp, Warning, TEXT("Can Character step up"))
+
 				HandleImpact(Hit, LastMoveTimeSlice, RampVector);
 				SlideAlongSurface(Delta, 1.f - PercentTimeApplied, Hit.Normal, Hit, true);
 			}
@@ -1020,8 +1019,8 @@ bool UHynmersMovementComponent::StepUp(const FVector & GravDir, const FVector & 
 	CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleSize(PawnRadius, PawnHalfHeight);
 
 	// Don't bother stepping up if top of capsule is hitting something.
-	const float InitialImpactZ = InHit.ImpactPoint.Z;
-	if (InitialImpactZ > OldLocation.Z + (PawnHalfHeight - PawnRadius))
+	const float InitialImpactZ = (InHit.ImpactPoint | UpVector);
+	if (InitialImpactZ > (OldLocation | UpVector) + (PawnHalfHeight - PawnRadius))
 	{
 		return false;
 	}
@@ -1037,7 +1036,7 @@ bool UHynmersMovementComponent::StepUp(const FVector & GravDir, const FVector & 
 	float StepTravelUpHeight = MaxStepHeight;
 	float StepTravelDownHeight = StepTravelUpHeight;
 	const float StepSideZ = -1.f * FVector::DotProduct(InHit.ImpactNormal, GravDir);
-	float PawnInitialFloorBaseZ = OldLocation.Z - PawnHalfHeight;
+	float PawnInitialFloorBaseZ = (OldLocation | UpVector) - PawnHalfHeight;
 	float PawnFloorPointZ = PawnInitialFloorBaseZ;
 
 	if (IsMovingOnGround() && CurrentFloor.IsWalkableFloor())
@@ -1051,7 +1050,7 @@ bool UHynmersMovementComponent::StepUp(const FVector & GravDir, const FVector & 
 		const bool bHitVerticalFace = !IsWithinEdgeTolerance(InHit.Location, InHit.ImpactPoint, PawnRadius);
 		if (!CurrentFloor.bLineTrace && !bHitVerticalFace)
 		{
-			PawnFloorPointZ = CurrentFloor.HitResult.ImpactPoint.Z;
+			PawnFloorPointZ = (CurrentFloor.HitResult.ImpactPoint | UpVector);
 		}
 		else
 		{
@@ -1220,6 +1219,92 @@ bool UHynmersMovementComponent::StepUp(const FVector & GravDir, const FVector & 
 	bJustTeleported |= !bMaintainHorizontalGroundVelocity;
 
 	return true;
+}
+
+void UHynmersMovementComponent::HandleImpact(const FHitResult & Impact, float TimeSlice, const FVector & MoveDelta)
+{
+	if (CharacterOwner)
+	{
+		CharacterOwner->MoveBlockedBy(Impact);
+	}
+	APawn* OtherPawn = Cast<APawn>(Impact.GetActor());
+	if (OtherPawn)
+	{
+		NotifyBumpedPawn(OtherPawn);
+	}
+
+	if (bEnablePhysicsInteraction)
+	{
+		const FVector ForceAccel = Acceleration + (IsFalling() ? GetGravityZ()*UpVector : FVector::ZeroVector);
+		ApplyImpactPhysicsForces(Impact, ForceAccel, Velocity);
+	}
+}
+
+void UHynmersMovementComponent::ApplyImpactPhysicsForces(const FHitResult & Impact, const FVector & ImpactAcceleration, const FVector & ImpactVelocity)
+{
+	if (bEnablePhysicsInteraction && Impact.bBlockingHit)
+	{
+		if (UPrimitiveComponent* ImpactComponent = Impact.GetComponent())
+		{
+			FBodyInstance* BI = ImpactComponent->GetBodyInstance(Impact.BoneName);
+			if (BI != nullptr && BI->IsInstanceSimulatingPhysics())
+			{
+				FVector ForcePoint = Impact.ImpactPoint;
+
+				const float BodyMass = FMath::Max(BI->GetBodyMass(), 1.0f);
+
+				if (bPushForceUsingZOffset)
+				{
+					FBox Bounds = BI->GetBodyBounds();
+
+					FVector Center, Extents;
+					Bounds.GetCenterAndExtents(Center, Extents);
+
+					if (!Extents.IsNearlyZero())
+					{
+						ForcePoint.Z = Center.Z + Extents.Z * PushForcePointZOffsetFactor;
+					}
+				}
+
+				FVector Force = Impact.ImpactNormal * -1.0f;
+
+				float PushForceModificator = 1.0f;
+
+				const FVector ComponentVelocity = ImpactComponent->GetPhysicsLinearVelocity();
+				const FVector VirtualVelocity = ImpactAcceleration.IsZero() ? ImpactVelocity : ImpactAcceleration.GetSafeNormal() * GetMaxSpeed();
+
+				float Dot = 0.0f;
+
+				if (bScalePushForceToVelocity && !ComponentVelocity.IsNearlyZero())
+				{
+					Dot = ComponentVelocity | VirtualVelocity;
+
+					if (Dot > 0.0f && Dot < 1.0f)
+					{
+						PushForceModificator *= Dot;
+					}
+				}
+
+				if (bPushForceScaledToMass)
+				{
+					PushForceModificator *= BodyMass;
+				}
+
+				Force *= PushForceModificator;
+
+				if (ComponentVelocity.IsNearlyZero())
+				{
+					Force *= InitialPushForceFactor;
+					ImpactComponent->AddImpulseAtLocation(Force, ForcePoint, Impact.BoneName);
+				}
+				else
+				{
+					Force *= PushForceFactor;
+					ImpactComponent->AddForceAtLocation(Force, ForcePoint, Impact.BoneName);
+				}
+			}
+		}
+	}
 }
 
 

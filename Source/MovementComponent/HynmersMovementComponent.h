@@ -19,7 +19,9 @@ class MOVEMENTCOMPONENT_API UHynmersMovementComponent : public UCharacterMovemen
 		PerformMovement
 			PhysWalking
 				MoveAlongfloor
-					HandleImpact
+					StepUp
+						HandleImpact
+							ApplyImpactPhysicsForces
 */
 public:
 
@@ -48,6 +50,10 @@ public:
 	bool MoveUpdatedComponent(const FVector& Delta, const FQuat& NewRotation, bool bSweep, FHitResult* OutHit = NULL, ETeleportType Teleport = ETeleportType::None);
 
 	virtual bool StepUp(const FVector& GravDir, const FVector& Delta, const FHitResult &Hit, struct UCharacterMovementComponent::FStepDownResult* OutStepDownResult = NULL) override;
+
+	virtual void HandleImpact(const FHitResult& Hit, float TimeSlice = 0.f, const FVector& MoveDelta = FVector::ZeroVector) override;
+
+	virtual void ApplyImpactPhysicsForces(const FHitResult& Impact, const FVector& ImpactAcceleration, const FVector& ImpactVelocity);
 
 	virtual void PhysSwimming(float deltaTime, int32 Iterations) override;
 
