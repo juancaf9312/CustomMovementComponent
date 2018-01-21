@@ -1141,7 +1141,7 @@ bool UHynmersMovementComponent::StepUp(const FVector & GravDir, const FVector & 
 	if (Hit.IsValidBlockingHit())
 	{
 		// See if this step sequence would have allowed us to travel higher than our max step height allows.
-		const float DeltaZ = Hit.ImpactPoint.Z - PawnFloorPointZ;
+		const float DeltaZ = (Hit.ImpactPoint | UpVector) - PawnFloorPointZ;
 		if (DeltaZ > MaxStepHeight)
 		{
 			//UE_LOG(LogCharacterMovement, VeryVerbose, TEXT("- Reject StepUp (too high Height %.3f) up from floor base %f to %f"), DeltaZ, PawnInitialFloorBaseZ, NewLocation.Z);
@@ -1163,7 +1163,7 @@ bool UHynmersMovementComponent::StepUp(const FVector & GravDir, const FVector & 
 
 			// Also reject if we would end up being higher than our starting location by stepping down.
 			// It's fine to step down onto an unwalkable normal below us, we will just slide off. Rejecting those moves would prevent us from being able to walk off the edge.
-			if (Hit.Location.Z > OldLocation.Z)
+			if ((Hit.Location | UpVector) > (OldLocation | UpVector))
 			{
 				//UE_LOG(LogCharacterMovement, VeryVerbose, TEXT("- Reject StepUp (unwalkable normal %s above old position)"), *Hit.ImpactNormal.ToString());
 				ScopedStepUpMovement.RevertMove();
@@ -1194,7 +1194,7 @@ bool UHynmersMovementComponent::StepUp(const FVector & GravDir, const FVector & 
 
 			// Reject unwalkable normals if we end up higher than our initial height.
 			// It's fine to walk down onto an unwalkable surface, don't reject those moves.
-			if (Hit.Location.Z > OldLocation.Z)
+			if ((Hit.Location | UpVector) > (OldLocation | UpVector))
 			{
 				// We should reject the floor result if we are trying to step up an actual step where we are not able to perch (this is rare).
 				// In those cases we should instead abort the step up and try to slide along the stair.
