@@ -1262,7 +1262,9 @@ void UHynmersMovementComponent::ApplyImpactPhysicsForces(const FHitResult & Impa
 
 					if (!Extents.IsNearlyZero())
 					{
-						ForcePoint.Z = Center.Z + Extents.Z * PushForcePointZOffsetFactor;
+						FVector RightVector = CharacterOwner->GetRootComponent()->GetRightVector();
+						FVector ForwardVector = CharacterOwner->GetRootComponent()->GetForwardVector();
+						ForcePoint = (ForcePoint | RightVector)*RightVector + (ForcePoint | ForwardVector)*ForwardVector + ((Center | UpVector) + (Extents | UpVector) * PushForcePointZOffsetFactor)*UpVector;
 					}
 				}
 
