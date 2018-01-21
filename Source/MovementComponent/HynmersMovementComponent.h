@@ -18,8 +18,7 @@ class MOVEMENTCOMPONENT_API UHynmersMovementComponent : public UCharacterMovemen
 	TickComponent
 		PerformMovement
 			PhysWalking
-				MoveAlongfloor
-					StepUp
+				GetLedgeMove
 */
 public:
 
@@ -35,6 +34,10 @@ public:
 	// Function in charged of move the updated component
 	virtual void MoveAlongFloor(const FVector& InVelocity, float DeltaSeconds, FStepDownResult* OutStepDownResult = NULL) override;
 
+	virtual FVector GetLedgeMove(const FVector& OldLocation, const FVector& Delta, const FVector& GravDir) const;
+
+	virtual bool ComputePerchResult(const float TestRadius, const FHitResult& InHit, const float InMaxFloorDist, FFindFloorResult& OutPerchFloorResult) const;
+
 	// function that clamp acceleration in Z
 	virtual FVector ConstrainInputAcceleration(const FVector& InputAcceleration) const override;
 
@@ -48,6 +51,10 @@ public:
 	bool MoveUpdatedComponent(const FVector& Delta, const FQuat& NewRotation, bool bSweep, FHitResult* OutHit = NULL, ETeleportType Teleport = ETeleportType::None);
 
 	virtual bool StepUp(const FVector& GravDir, const FVector& Delta, const FHitResult &Hit, struct UCharacterMovementComponent::FStepDownResult* OutStepDownResult = NULL) override;
+
+	virtual bool IsWithinEdgeTolerance(const FVector& CapsuleLocation, const FVector& TestImpactPoint, const float CapsuleRadius) const;
+
+	virtual void AdjustFloorHeight();
 
 	virtual void HandleImpact(const FHitResult& Hit, float TimeSlice = 0.f, const FVector& MoveDelta = FVector::ZeroVector) override;
 

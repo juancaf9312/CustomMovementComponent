@@ -24,6 +24,7 @@ DECLARE_CYCLE_STAT(TEXT("Char PhysWalking"), STAT_CharPhysWalking, STATGROUP_Cha
 DECLARE_CYCLE_STAT(TEXT("Char PhysFalling"), STAT_CharPhysFalling, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char FindFloor"), STAT_CharFindFloor, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char StepUp"), STAT_CharStepUp, STATGROUP_Character);
+DECLARE_CYCLE_STAT(TEXT("Char AdjustFloorHeight"), STAT_CharAdjustFloorHeight, STATGROUP_Character);
 
 const float MAX_STEP_SIDE_Z = 0.08f;	// maximum z value for the normal on the vertical side of steps
 const float VERTICAL_SLOPE_NORMAL_Z = 0.001f; // Slope is vertical if Abs(Normal.Z) <= this threshold. Accounts for precision problems that sometimes angle normals slightly off horizontal for vertical surface.
@@ -178,7 +179,7 @@ void UHynmersMovementComponent::TickComponent(float DeltaTime, enum ELevelTick T
 	SCOPE_CYCLE_COUNTER(STAT_CharacterMovementTick);
 
 	const FVector InputVector = ConsumeInputVector();
-	UpVector = CharacterOwner->GetRootComponent()->GetUpVector();
+	UpVector = UpdatedComponent->GetUpVector();
 
 	//UE_LOG(LogTemp, Warning, TEXT("Current floor normal: %s"), *CurrentFloor.HitResult.ImpactNormal.ToString())
 
@@ -727,12 +728,12 @@ void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 			FindFloor(UpdatedComponent->GetComponentLocation(), CurrentFloor, bZeroDelta, NULL);
 		}
 
-		// check for ledges here
+		 //check for ledges here
 		const bool bCheckLedges = !CanWalkOffLedges();
 		if (bCheckLedges && !CurrentFloor.IsWalkableFloor())
 		{
 			// calculate possible alternate movement
-			const FVector GravDir = FVector(0.f, 0.f, -1.f);
+			const FVector GravDir = -UpVector;
 			const FVector NewDelta = bTriedLedgeMove ? FVector::ZeroVector : GetLedgeMove(OldLocation, Delta, GravDir);
 			if (!NewDelta.IsZero())
 			{
@@ -770,16 +771,6 @@ void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 			// Validate the floor check
 			if (CurrentFloor.IsWalkableFloor())
 			{
-				if (ShouldCatchAir(OldFloor, CurrentFloor))
-				{
-					CharacterOwner->OnWalkingOffLedge(OldFloor.HitResult.ImpactNormal, OldFloor.HitResult.Normal, OldLocation, timeTick);
-					if (IsMovingOnGround())
-					{
-						// If still walking, then fall. If not, assume the user set a different mode they want to keep.
-						StartFalling(Iterations, remainingTime, timeTick, Delta, OldLocation);
-					}
-					return;
-				}
 
 				AdjustFloorHeight();
 				SetBase(CurrentFloor.HitResult.Component.Get(), CurrentFloor.HitResult.BoneName);
@@ -906,13 +897,70 @@ void UHynmersMovementComponent::MoveAlongFloor(const FVector & InVelocity, float
 			}
 			else if (Hit.Component.IsValid() && !Hit.Component.Get()->CanCharacterStepUp(CharacterOwner))
 			{
-				UE_LOG(LogTemp, Warning, TEXT("Can Character step up"))
-
 				HandleImpact(Hit, LastMoveTimeSlice, RampVector);
 				SlideAlongSurface(Delta, 1.f - PercentTimeApplied, Hit.Normal, Hit, true);
 			}
 		}
 	}
+}
+
+FVector UHynmersMovementComponent::GetLedgeMove(const FVector & OldLocation, const FVector & Delta, const FVector & GravDir) const
+{
+	UE_LOG(LogTemp, Warning, TEXT("Own LedgeMovement"))
+	if (!HasValidData() || Delta.IsZero())
+	{
+		return FVector::ZeroVector;
+	}
+	FVector RightVector = UpdatedComponent->GetRightVector();
+	FVector ForwardVector = UpdatedComponent->GetForwardVector();
+	FVector SideDir = (Delta | RightVector)*ForwardVector - (Delta | ForwardVector)*RightVector;
+
+	// try left
+	if (CheckLedgeDirection(OldLocation, SideDir, GravDir))
+	{
+		return SideDir;
+	}
+
+	// try right
+	SideDir *= -1.f;
+	if (CheckLedgeDirection(OldLocation, SideDir, GravDir))
+	{
+		return SideDir;
+	}
+
+	return FVector::ZeroVector;
+}
+
+bool UHynmersMovementComponent::ComputePerchResult(const float TestRadius, const FHitResult & InHit, const float InMaxFloorDist, FFindFloorResult & OutPerchFloorResult) const
+{
+	if (InMaxFloorDist <= 0.f)
+	{
+		return 0.f;
+	}
+
+	// Sweep further than actual requested distance, because a reduced capsule radius means we could miss some hits that the normal radius would contact.
+	float PawnRadius, PawnHalfHeight;
+	CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleSize(PawnRadius, PawnHalfHeight);
+
+	const float InHitAboveBase = FMath::Max(0.f, (InHit.ImpactPoint | UpVector)- ((InHit.Location | UpVector) - PawnHalfHeight));
+	const float PerchLineDist = FMath::Max(0.f, InMaxFloorDist - InHitAboveBase);
+	const float PerchSweepDist = FMath::Max(0.f, InMaxFloorDist);
+
+	const float ActualSweepDist = PerchSweepDist + PawnRadius;
+	ComputeFloorDist(InHit.Location, PerchLineDist, ActualSweepDist, OutPerchFloorResult, TestRadius);
+
+	if (!OutPerchFloorResult.IsWalkableFloor())
+	{
+		return false;
+	}
+	else if (InHitAboveBase + OutPerchFloorResult.FloorDist > InMaxFloorDist)
+	{
+		// Hit something past max distance
+		OutPerchFloorResult.bWalkableFloor = false;
+		return false;
+	}
+
+	return true;
 }
 
 FVector UHynmersMovementComponent::ConstrainInputAcceleration(const FVector & InputAcceleration) const
@@ -944,8 +992,8 @@ FVector UHynmersMovementComponent::ComputeGroundMovementDelta(const FVector & De
 
 		// Compute a vector that moves parallel to the surface, by projecting the horizontal movement direction onto the ramp.
 		const float FloorDotDelta = (FloorNormal | Delta);
-		FVector RightVector = CharacterOwner->GetRootComponent()->GetRightVector();
-		FVector ForwardVector = CharacterOwner->GetRootComponent()->GetForwardVector();
+		FVector RightVector = UpdatedComponent->GetRightVector();
+		FVector ForwardVector = UpdatedComponent->GetForwardVector();
 		FVector RampMovement = (Delta | RightVector)*RightVector + (Delta | ForwardVector)*ForwardVector + (-FloorDotDelta / (FloorNormal | UpVector))*UpVector;
 
 		if (bMaintainHorizontalGroundVelocity)
@@ -1221,6 +1269,78 @@ bool UHynmersMovementComponent::StepUp(const FVector & GravDir, const FVector & 
 	return true;
 }
 
+bool UHynmersMovementComponent::IsWithinEdgeTolerance(const FVector & CapsuleLocation, const FVector & TestImpactPoint, const float CapsuleRadius) const
+{
+	const float DistFromCenterSq = ((TestImpactPoint - CapsuleLocation) - ((TestImpactPoint - CapsuleLocation)|UpVector)*UpVector).SizeSquared();
+	const float ReducedRadiusSq = FMath::Square(FMath::Max(SWEEP_EDGE_REJECT_DISTANCE + KINDA_SMALL_NUMBER, CapsuleRadius - SWEEP_EDGE_REJECT_DISTANCE));
+	return DistFromCenterSq < ReducedRadiusSq;
+}
+
+void UHynmersMovementComponent::AdjustFloorHeight()
+{
+	SCOPE_CYCLE_COUNTER(STAT_CharAdjustFloorHeight);
+
+	// If we have a floor check that hasn't hit anything, don't adjust height.
+	if (!CurrentFloor.IsWalkableFloor())
+	{
+		return;
+	}
+
+	float OldFloorDist = CurrentFloor.FloorDist;
+	if (CurrentFloor.bLineTrace)
+	{
+		if (OldFloorDist < MIN_FLOOR_DIST && CurrentFloor.LineDist >= MIN_FLOOR_DIST)
+		{
+			// This would cause us to scale unwalkable walls
+			UE_LOG(LogTemp, Log, TEXT("Adjust floor height aborting due to line trace with small floor distance (line: %.2f, sweep: %.2f)"), CurrentFloor.LineDist, CurrentFloor.FloorDist);
+			return;
+		}
+		else
+		{
+			// Falling back to a line trace means the sweep was unwalkable (or in penetration). Use the line distance for the vertical adjustment.
+			OldFloorDist = CurrentFloor.LineDist;
+		}
+	}
+
+	// Move up or down to maintain floor height.
+	if (OldFloorDist < MIN_FLOOR_DIST || OldFloorDist > MAX_FLOOR_DIST)
+	{
+		FHitResult AdjustHit(1.f);
+		const float InitialZ = UpdatedComponent->GetComponentLocation() | UpVector;
+		const float AvgFloorDist = (MIN_FLOOR_DIST + MAX_FLOOR_DIST) * 0.5f;
+		const float MoveDist = AvgFloorDist - OldFloorDist;
+		SafeMoveUpdatedComponent(MoveDist*UpVector, UpdatedComponent->GetComponentQuat(), true, AdjustHit);
+		UE_LOG(LogTemp, Log, TEXT("Adjust floor height %.3f (Hit = %d)"), MoveDist, AdjustHit.bBlockingHit);
+
+		if (!AdjustHit.IsValidBlockingHit())
+		{
+			CurrentFloor.FloorDist += MoveDist;
+		}
+		else if (MoveDist > 0.f)
+		{
+			const float CurrentZ = UpdatedComponent->GetComponentLocation() | UpVector;
+			CurrentFloor.FloorDist += CurrentZ - InitialZ;
+		}
+		else
+		{
+			checkSlow(MoveDist < 0.f);
+			const float CurrentZ = UpdatedComponent->GetComponentLocation() | UpVector;
+			CurrentFloor.FloorDist = CurrentZ - (AdjustHit.Location | UpVector);
+			if (IsWalkable(AdjustHit))
+			{
+				CurrentFloor.SetFromSweep(AdjustHit, CurrentFloor.FloorDist, true);
+			}
+		}
+
+		// Don't recalculate velocity based on this height adjustment, if considering vertical adjustments.
+		// Also avoid it if we moved out of penetration
+		bJustTeleported |= !bMaintainHorizontalGroundVelocity || (OldFloorDist < 0.f);
+
+		// If something caused us to adjust our height (especially a depentration) we should ensure another check next frame or we will keep a stale result.
+		bForceNextFloorCheck = true;
+	}
+}
+
 void UHynmersMovementComponent::HandleImpact(const FHitResult & Impact, float TimeSlice, const FVector & MoveDelta)
 {
 	if (CharacterOwner)
@@ -1262,8 +1382,8 @@ void UHynmersMovementComponent::ApplyImpactPhysicsForces(const FHitResult & Impa
 
 					if (!Extents.IsNearlyZero())
 					{
-						FVector RightVector = CharacterOwner->GetRootComponent()->GetRightVector();
-						FVector ForwardVector = CharacterOwner->GetRootComponent()->GetForwardVector();
+						FVector RightVector = UpdatedComponent->GetRightVector();
+						FVector ForwardVector = UpdatedComponent->GetForwardVector();
 						ForcePoint = (ForcePoint | RightVector)*RightVector + (ForcePoint | ForwardVector)*ForwardVector + ((Center | UpVector) + (Extents | UpVector) * PushForcePointZOffsetFactor)*UpVector;
 					}
 				}
@@ -1789,6 +1909,7 @@ bool UHynmersMovementComponent::DoJump(bool bReplayingMoves)
 void UHynmersMovementComponent::FindFloor(const FVector & CapsuleLocation, FFindFloorResult & OutFloorResult, bool bZeroDelta, const FHitResult * DownwardSweepResult) const
 {
 	SCOPE_CYCLE_COUNTER(STAT_CharFindFloor);
+
 	// No collision, no floor...
 	if (!HasValidData() || !UpdatedComponent->IsQueryCollisionEnabled())
 	{
@@ -1803,6 +1924,7 @@ void UHynmersMovementComponent::FindFloor(const FVector & CapsuleLocation, FFind
 
 	float FloorSweepTraceDist = FMath::Max(MAX_FLOOR_DIST, MaxStepHeight + HeightCheckAdjust);
 	float FloorLineTraceDist = FloorSweepTraceDist;
+	bool bNeedToValidateFloor = true;
 
 	// Sweep floor
 	if (FloorLineTraceDist > 0.f || FloorSweepTraceDist > 0.f)
@@ -1814,11 +1936,73 @@ void UHynmersMovementComponent::FindFloor(const FVector & CapsuleLocation, FFind
 			MutableThis->bForceNextFloorCheck = false;
 			ComputeFloorDist(CapsuleLocation, FloorLineTraceDist, FloorSweepTraceDist, OutFloorResult, CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleRadius(), DownwardSweepResult);
 		}
-		else {
-			UE_LOG(LogTemp, Warning, TEXT("Please enable AlwaysCheckFloor"))
+		else
+		{
+			// Force floor check if base has collision disabled or if it does not block us.
+			UPrimitiveComponent* MovementBase = CharacterOwner->GetMovementBase();
+			const AActor* BaseActor = MovementBase ? MovementBase->GetOwner() : NULL;
+			const ECollisionChannel CollisionChannel = UpdatedComponent->GetCollisionObjectType();
+
+			if (MovementBase != NULL)
+			{
+				MutableThis->bForceNextFloorCheck = !MovementBase->IsQueryCollisionEnabled()
+					|| MovementBase->GetCollisionResponseToChannel(CollisionChannel) != ECR_Block
+					|| MovementBaseUtility::IsDynamicBase(MovementBase);
+			}
+
+			const bool IsActorBasePendingKill = BaseActor && BaseActor->IsPendingKill();
+
+			if (!bForceNextFloorCheck && !IsActorBasePendingKill && MovementBase)
+			{
+				//UE_LOG(LogCharacterMovement, Log, TEXT("%s SKIP check for floor"), *CharacterOwner->GetName());
+				OutFloorResult = CurrentFloor;
+				bNeedToValidateFloor = false;
+			}
+			else
+			{
+				MutableThis->bForceNextFloorCheck = false;
+				ComputeFloorDist(CapsuleLocation, FloorLineTraceDist, FloorSweepTraceDist, OutFloorResult, CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleRadius(), DownwardSweepResult);
+			}
 		}
 	}
 
+	// OutFloorResult.HitResult is now the result of the vertical floor check.
+	// See if we should try to "perch" at this location.
+	if (bNeedToValidateFloor && OutFloorResult.bBlockingHit && !OutFloorResult.bLineTrace)
+	{
+		const bool bCheckRadius = true;
+		if (ShouldComputePerchResult(OutFloorResult.HitResult, bCheckRadius))
+		{
+			float MaxPerchFloorDist = FMath::Max(MAX_FLOOR_DIST, MaxStepHeight + HeightCheckAdjust);
+			if (IsMovingOnGround())
+			{
+				MaxPerchFloorDist += FMath::Max(0.f, PerchAdditionalHeight);
+			}
+
+			FFindFloorResult PerchFloorResult;
+			if (ComputePerchResult(GetValidPerchRadius(), OutFloorResult.HitResult, MaxPerchFloorDist, PerchFloorResult))
+			{
+				// Don't allow the floor distance adjustment to push us up too high, or we will move beyond the perch distance and fall next time.
+				const float AvgFloorDist = (MIN_FLOOR_DIST + MAX_FLOOR_DIST) * 0.5f;
+				const float MoveUpDist = (AvgFloorDist - OutFloorResult.FloorDist);
+				if (MoveUpDist + PerchFloorResult.FloorDist >= MaxPerchFloorDist)
+				{
+					OutFloorResult.FloorDist = AvgFloorDist;
+				}
+
+				// If the regular capsule is on an unwalkable surface but the perched one would allow us to stand, override the normal to be one that is walkable.
+				if (!OutFloorResult.bWalkableFloor)
+				{
+					OutFloorResult.SetFromLineTrace(PerchFloorResult.HitResult, OutFloorResult.FloorDist, FMath::Min(PerchFloorResult.FloorDist, PerchFloorResult.LineDist), true);
+				}
+			}
+			else
+			{
+				// We had no floor (or an invalid one because it was unwalkable), and couldn't perch here, so invalidate floor (which will cause us to start falling).
+				OutFloorResult.bWalkableFloor = false;
+			}
+		}
+	}
 }
 
 void UHynmersMovementComponent::ComputeFloorDist(const FVector & CapsuleLocation, float LineDistance, float SweepDistance, FFindFloorResult & OutFloorResult, float SweepRadius, const FHitResult * DownwardSweepResult) const
@@ -1829,29 +2013,29 @@ void UHynmersMovementComponent::ComputeFloorDist(const FVector & CapsuleLocation
 	CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleSize(PawnRadius, PawnHalfHeight);
 
 	bool bSkipSweep = false;
-	//if (DownwardSweepResult != NULL && DownwardSweepResult->IsValidBlockingHit())
-	//{
-	//	UE_LOG(LogTemp, Warning, TEXT("TIME_%d: DownwardSweepResult different from null"),GetWorld()->GetTimeSeconds())
-	//	// Only if the supplied sweep was vertical and downward.
-	//	if ((DownwardSweepResult->TraceStart.Z > DownwardSweepResult->TraceEnd.Z) &&
-	//		(DownwardSweepResult->TraceStart - DownwardSweepResult->TraceEnd).SizeSquared2D() <= KINDA_SMALL_NUMBER)
-	//	{
-	//		// Reject hits that are barely on the cusp of the radius of the capsule
-	//		if (IsWithinEdgeTolerance(DownwardSweepResult->Location, DownwardSweepResult->ImpactPoint, PawnRadius))
-	//		{
-	//			// Don't try a redundant sweep, regardless of whether this sweep is usable.
-	//			bSkipSweep = true;
-	//			const bool bIsWalkable = IsWalkable(*DownwardSweepResult);
-	//			const float FloorDist = (CapsuleLocation.Z - DownwardSweepResult->Location.Z);
-	//			OutFloorResult.SetFromSweep(*DownwardSweepResult, FloorDist, bIsWalkable);
-	//			if (bIsWalkable)
-	//			{
-	//				// Use the supplied downward sweep as the floor hit result.			
-	//				return;
-	//			}
-	//		}
-	//	}
-	//}
+	if (DownwardSweepResult != NULL && DownwardSweepResult->IsValidBlockingHit())
+	{
+		// Only if the supplied sweep was vertical and downward.
+		FVector TraceDifference = DownwardSweepResult->TraceStart - DownwardSweepResult->TraceEnd;
+		if (((DownwardSweepResult->TraceStart | UpVector) > (DownwardSweepResult->TraceEnd | UpVector)) &&
+			(TraceDifference-(TraceDifference | UpVector)*UpVector).SizeSquared() <= KINDA_SMALL_NUMBER)
+		{
+			// Reject hits that are barely on the cusp of the radius of the capsule
+			if (IsWithinEdgeTolerance(DownwardSweepResult->Location, DownwardSweepResult->ImpactPoint, PawnRadius))
+			{
+				// Don't try a redundant sweep, regardless of whether this sweep is usable.
+				bSkipSweep = true;
+				const bool bIsWalkable = IsWalkable(*DownwardSweepResult);
+				const float FloorDist = ((CapsuleLocation | UpVector) - (DownwardSweepResult->Location | UpVector));
+				OutFloorResult.SetFromSweep(*DownwardSweepResult, FloorDist, bIsWalkable);
+				if (bIsWalkable)
+				{
+					// Use the supplied downward sweep as the floor hit result.			
+					return;
+				}
+			}
+		}
+	}
 
 	// We require the sweep distance to be >= the line distance, otherwise the HitResult can't be interpreted as the sweep result.
 	if (SweepDistance < LineDistance)
@@ -1878,7 +2062,7 @@ void UHynmersMovementComponent::ComputeFloorDist(const FVector & CapsuleLocation
 		FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(SweepRadius, PawnHalfHeight - ShrinkHeight);
 
 		FHitResult Hit(1.f);
-		bBlockingHit = FloorSweepTest(Hit, CapsuleLocation, CapsuleLocation - CharacterOwner->GetRootComponent()->GetUpVector()*TraceDist , CollisionChannel, CapsuleShape, QueryParams, ResponseParam);
+		bBlockingHit = FloorSweepTest(Hit, CapsuleLocation, CapsuleLocation - UpdatedComponent->GetUpVector()*TraceDist , CollisionChannel, CapsuleShape, QueryParams, ResponseParam);
 
 		if (bBlockingHit)
 		{
@@ -1896,7 +2080,7 @@ void UHynmersMovementComponent::ComputeFloorDist(const FVector & CapsuleLocation
 					CapsuleShape.Capsule.HalfHeight = FMath::Max(PawnHalfHeight - ShrinkHeight, CapsuleShape.Capsule.Radius);
 					Hit.Reset(1.f, false);
 
-					bBlockingHit = FloorSweepTest(Hit, CapsuleLocation, CapsuleLocation - CharacterOwner->GetRootComponent()->GetUpVector()*TraceDist, CollisionChannel, CapsuleShape, QueryParams, ResponseParam);
+					bBlockingHit = FloorSweepTest(Hit, CapsuleLocation, CapsuleLocation - UpdatedComponent->GetUpVector()*TraceDist, CollisionChannel, CapsuleShape, QueryParams, ResponseParam);
 				}
 			}
 
@@ -1932,7 +2116,7 @@ void UHynmersMovementComponent::ComputeFloorDist(const FVector & CapsuleLocation
 		const float ShrinkHeight = PawnHalfHeight;
 		const FVector LineTraceStart = CapsuleLocation;
 		const float TraceDist = LineDistance + ShrinkHeight;
-		const FVector Down = -CharacterOwner->GetRootComponent()->GetUpVector();
+		const FVector Down = -UpdatedComponent->GetUpVector();
 		QueryParams.TraceTag = SCENE_QUERY_STAT_NAME_ONLY(FloorLineTrace);
 
 		FHitResult Hit(1.f);
@@ -1971,7 +2155,7 @@ bool UHynmersMovementComponent::FloorSweepTest(FHitResult & OutHit, const FVecto
 
 	if (!bUseFlatBaseForFloorChecks)
 	{
-		bBlockingHit = GetWorld()->SweepSingleByChannel(OutHit, Start, End, CharacterOwner->GetRootComponent()->GetComponentQuat(), TraceChannel, CollisionShape, Params, ResponseParam);
+		bBlockingHit = GetWorld()->SweepSingleByChannel(OutHit, Start, End, UpdatedComponent->GetComponentQuat(), TraceChannel, CollisionShape, Params, ResponseParam);
 	}
 	else
 	{
@@ -2003,7 +2187,7 @@ bool UHynmersMovementComponent::IsWalkable(const FHitResult & Hit) const
 	}
 	
 	// Never walk up vertical surfaces.
-	if ((Hit.ImpactNormal | CharacterOwner->GetRootComponent()->GetUpVector()) < KINDA_SMALL_NUMBER)
+	if ((Hit.ImpactNormal | UpdatedComponent->GetUpVector()) < KINDA_SMALL_NUMBER)
 	{
 		return false;
 	}
@@ -2019,7 +2203,7 @@ bool UHynmersMovementComponent::IsWalkable(const FHitResult & Hit) const
 	}
 
 	// Can't walk on this surface if it is too steep.
-	if ((Hit.ImpactNormal | CharacterOwner->GetRootComponent()->GetUpVector())  < TestWalkableZ)
+	if ((Hit.ImpactNormal | UpdatedComponent->GetUpVector())  < TestWalkableZ)
 	{
 		return false;
 	}
