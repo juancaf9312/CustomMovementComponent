@@ -1309,6 +1309,90 @@ void UHynmersMovementComponent::ApplyImpactPhysicsForces(const FHitResult & Impa
 	}
 }
 
+float UHynmersMovementComponent::SlideAlongSurface(const FVector & Delta, float Time, const FVector & InNormal, FHitResult & Hit, bool bHandleImpact)
+{
+	if (!Hit.bBlockingHit)
+	{
+		return 0.f;
+	}
+
+	FVector Normal(InNormal);
+	if (IsMovingOnGround())
+	{
+		// We don't want to be pushed up an unwalkable surface.
+		if ((Normal | UpVector) > 0.f)
+		{
+			if (!IsWalkable(Hit))
+			{
+				Normal -= (Normal | UpVector)*UpVector;
+			}
+		}
+		else if ((Normal | UpVector) < -KINDA_SMALL_NUMBER)
+		{
+			// Don't push down into the floor when the impact is on the upper portion of the capsule.
+			if (CurrentFloor.FloorDist < MIN_FLOOR_DIST && CurrentFloor.bBlockingHit)
+			{
+				const FVector FloorNormal = CurrentFloor.HitResult.Normal;
+				const bool bFloorOpposedToMovement = (Delta | FloorNormal) < 0.f && ((FloorNormal | UpVector) < 1.f - DELTA);
+				if (bFloorOpposedToMovement)
+				{
+					Normal = FloorNormal;
+				}
+
+				Normal -= (Normal | UpVector)*UpVector;
+			}
+		}
+	}
+
+	if (!Hit.bBlockingHit)
+	{
+		return 0.f;
+	}
+
+	float PercentTimeApplied = 0.f;
+	const FVector OldHitNormal = Normal;
+
+	FVector SlideDelta = ComputeSlideVector(Delta, Time, Normal, Hit);
+
+	if ((SlideDelta | Delta) > 0.f)
+	{
+		const FQuat Rotation = UpdatedComponent->GetComponentQuat();
+		SafeMoveUpdatedComponent(SlideDelta, Rotation, true, Hit);
+
+		const float FirstHitPercent = Hit.Time;
+		PercentTimeApplied = FirstHitPercent;
+		if (Hit.IsValidBlockingHit())
+		{
+			// Notify first impact
+			if (bHandleImpact)
+			{
+				HandleImpact(Hit, FirstHitPercent * Time, SlideDelta);
+			}
+
+			// Compute new slide normal when hitting multiple surfaces.
+			TwoWallAdjust(SlideDelta, Hit, OldHitNormal);
+
+			// Only proceed if the new direction is of significant length and not in reverse of original attempted move.
+			if (!SlideDelta.IsNearlyZero(1e-3f) && (SlideDelta | Delta) > 0.f)
+			{
+				// Perform second move
+				SafeMoveUpdatedComponent(SlideDelta, Rotation, true, Hit);
+				const float SecondHitPercent = Hit.Time * (1.f - FirstHitPercent);
+				PercentTimeApplied += SecondHitPercent;
+
+				// Notify second impact
+				if (bHandleImpact && Hit.bBlockingHit)
+				{
+					HandleImpact(Hit, SecondHitPercent * Time, SlideDelta);
+				}
+			}
+		}
+
+		return FMath::Clamp(PercentTimeApplied, 0.f, 1.f);
+	}
+
+	return 0.f;
+}
 
 void UHynmersMovementComponent::PhysSwimming(float deltaTime, int32 Iterations)
 {
