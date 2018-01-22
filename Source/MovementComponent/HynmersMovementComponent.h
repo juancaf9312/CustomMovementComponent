@@ -78,6 +78,10 @@ public:
 
 	virtual bool IsWalkable(const FHitResult& Hit) const override;
 
+	// Angular velocity in degrees per second
+	UPROPERTY(Category = "Character Movement: Walking", EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", UIMin = "0"))
+		float AngularVelocity = 5;
+
 private:
 	FVector UpVector;
 };

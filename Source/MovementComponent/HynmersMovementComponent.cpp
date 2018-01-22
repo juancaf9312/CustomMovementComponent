@@ -12,6 +12,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/NetworkObjectList.h"
+#include "Kismet/KismetMathLibrary.h"
 
 DECLARE_CYCLE_STAT(TEXT("Char Tick"), STAT_CharacterMovementTick, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char NonSimulated Time"), STAT_CharacterMovementNonSimulated, STATGROUP_Character);
@@ -181,7 +182,12 @@ void UHynmersMovementComponent::TickComponent(float DeltaTime, enum ELevelTick T
 	const FVector InputVector = ConsumeInputVector();
 	UpVector = UpdatedComponent->GetUpVector();
 
-	//UE_LOG(LogTemp, Warning, TEXT("Current floor normal: %s"), *CurrentFloor.HitResult.ImpactNormal.ToString())
+	if ((CurrentFloor.HitResult.ImpactNormal | UpVector) >= KINDA_SMALL_NUMBER) {
+		FVector AxisToRotate = FVector::CrossProduct(UpVector , CurrentFloor.HitResult.ImpactNormal);
+		FQuat DeltaRotation(UKismetMathLibrary::RotatorFromAxisAndAngle(AxisToRotate, AngularVelocity*DeltaTime));
+
+		UpdatedComponent->AddWorldRotation(DeltaRotation);
+	}
 
 	if (!HasValidData() || ShouldSkipUpdate(DeltaTime))
 	{
