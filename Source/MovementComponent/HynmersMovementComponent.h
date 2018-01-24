@@ -18,6 +18,9 @@ class MOVEMENTCOMPONENT_API UHynmersMovementComponent : public UCharacterMovemen
 	TickComponent
 		PerformMovement
 			PhysFalling
+				ProcessLanded
+					ComputeSlideVector
+						HandleSlopeBoosting
 */
 public:
 
@@ -76,6 +79,16 @@ public:
 	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
 
 	virtual bool DoJump(bool bReplayingMoves) override;
+
+	virtual void ProcessLanded(const FHitResult& Hit, float remainingTime, int32 Iterations) override;
+
+	virtual void SetPostLandedPhysics(const FHitResult& Hit) override;
+
+	virtual FVector LimitAirControl(float DeltaTime, const FVector& FallAcceleration, const FHitResult& HitResult, bool bCheckForValidLandingSpot) override;
+
+	virtual FVector HandleSlopeBoosting(const FVector& SlideResult, const FVector& Delta, const float Time, const FVector& Normal, const FHitResult& Hit) const;
+
+	virtual void TwoWallAdjust(FVector& Delta, const FHitResult& Hit, const FVector& OldHitNormal) const override;
 
 	// Angular velocity in degrees per second
 	UPROPERTY(Category = "Character Movement: Walking", EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", UIMin = "0"))

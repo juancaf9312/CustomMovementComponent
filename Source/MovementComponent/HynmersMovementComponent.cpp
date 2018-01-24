@@ -821,7 +821,6 @@ void UHynmersMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 			// Make velocity reflect actual move
 			if (!bJustTeleported && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && timeTick >= MIN_TICK_TIME)
 			{
-				// TODO-RootMotionSource: Allow this to happen during partial override Velocity, but only set allowed axes?
 				Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / timeTick;
 			}
 		}
@@ -2062,7 +2061,6 @@ void UHynmersMovementComponent::PhysFalling(float deltaTime, int32 Iterations)
 					if (FloorResult.IsWalkableFloor() && IsValidLandingSpot(PawnLocation, FloorResult.HitResult))
 					{
 						remainingTime += subTimeTickRemaining;
-						//TODO Change function ProcessLanded
 						ProcessLanded(FloorResult.HitResult, remainingTime, Iterations);
 						return;
 					}
@@ -2081,14 +2079,12 @@ void UHynmersMovementComponent::PhysFalling(float deltaTime, int32 Iterations)
 				if (bHasAirControl)
 				{
 					const bool bCheckLandingSpot = false; // we already checked above.
-					// TODO change function LimitAirControl
 					const FVector AirControlDeltaV = LimitAirControl(LastMoveTimeSlice, AirControlAccel, Hit, bCheckLandingSpot) * LastMoveTimeSlice;
 					Adjusted = (VelocityNoAirControl + AirControlDeltaV) * LastMoveTimeSlice;
 				}
 
 				const FVector OldHitNormal = Hit.Normal;
 				const FVector OldHitImpactNormal = Hit.ImpactNormal;
-				// TODO Change fucntions inside ComputeSlideVector
 				FVector Delta = ComputeSlideVector(Adjusted, 1.f - Hit.Time, OldHitNormal, Hit);
 
 				// Compute velocity after deflection (only gravity component for RootMotion)
@@ -2223,3 +2219,167 @@ bool UHynmersMovementComponent::DoJump(bool bReplayingMoves)
 	return false;
 }
 
+void UHynmersMovementComponent::ProcessLanded(const FHitResult & Hit, float remainingTime, int32 Iterations)
+{
+	UE_LOG(LogTemp, Warning, TEXT("Im Landing"))
+	if (CharacterOwner && CharacterOwner->ShouldNotifyLanded(Hit))
+	{
+		CharacterOwner->Landed(Hit);
+	}
+	if (IsFalling())
+	{
+
+		SetPostLandedPhysics(Hit);
+	}
+
+	StartNewPhysics(remainingTime, Iterations);
+}
+
+void UHynmersMovementComponent::SetPostLandedPhysics(const FHitResult & Hit)
+{
+	if (CharacterOwner)
+	{
+		if (CanEverSwim() && IsInWater())
+		{
+			SetMovementMode(MOVE_Swimming);
+		}
+		else
+		{
+			const FVector PreImpactAccel = Acceleration + (IsFalling() ? GetGravityZ()*UpVector : FVector::ZeroVector);
+			const FVector PreImpactVelocity = Velocity;
+
+			if (DefaultLandMovementMode == MOVE_Walking ||
+				DefaultLandMovementMode == MOVE_NavWalking ||
+				DefaultLandMovementMode == MOVE_Falling)
+			{
+				SetMovementMode(GetGroundMovementMode());
+			}
+			else
+			{
+				SetDefaultMovementMode();
+			}
+
+			ApplyImpactPhysicsForces(Hit, PreImpactAccel, PreImpactVelocity);
+		}
+	}
+}
+
+FVector UHynmersMovementComponent::LimitAirControl(float DeltaTime, const FVector & FallAcceleration, const FHitResult & HitResult, bool bCheckForValidLandingSpot)
+{
+	FVector Result(FallAcceleration);
+
+	if (HitResult.IsValidBlockingHit() && (HitResult.Normal | UpVector) > VERTICAL_SLOPE_NORMAL_Z)
+	{
+		if (!bCheckForValidLandingSpot || !IsValidLandingSpot(HitResult.Location, HitResult))
+		{
+			// If acceleration is into the wall, limit contribution.
+			if (FVector::DotProduct(FallAcceleration, HitResult.Normal) < 0.f)
+			{
+				// Allow movement parallel to the wall, but not into it because that may push us up.
+				const FVector Normal2D = (HitResult.Normal - (HitResult.Normal | UpVector)*UpVector).GetSafeNormal();
+				Result = FVector::VectorPlaneProject(FallAcceleration, Normal2D);
+			}
+		}
+	}
+	else if (HitResult.bStartPenetrating)
+	{
+		// Allow movement out of penetration.
+		return (FVector::DotProduct(Result, HitResult.Normal) > 0.f ? Result : FVector::ZeroVector);
+	}
+
+	return Result;
+}
+
+FVector UHynmersMovementComponent::HandleSlopeBoosting(const FVector & SlideResult, const FVector & Delta, const float Time, const FVector & Normal, const FHitResult & Hit) const
+{
+	FVector Result = SlideResult;
+
+	if ((Result | UpVector) > 0.f)
+	{
+		// Don't move any higher than we originally intended.
+		const float ZLimit = (Delta | UpVector) * Time;
+		if ((Result | UpVector) - ZLimit > KINDA_SMALL_NUMBER)
+		{
+			if (ZLimit > 0.f)
+			{
+				// Rescale the entire vector (not just the Z component) otherwise we change the direction and likely head right back into the impact.
+				const float UpPercent = ZLimit / (Result | UpVector);
+				Result *= UpPercent;
+			}
+			else
+			{
+				// We were heading down but were going to deflect upwards. Just make the deflection horizontal.
+				Result = FVector::ZeroVector;
+			}
+
+			// Make remaining portion of original result horizontal and parallel to impact normal.
+			const FVector RemainderXY = ((SlideResult - Result) | ForwardVector)*ForwardVector + ((SlideResult - Result) | RightVector)*RightVector;
+			const FVector NormalXY = (Normal -(Normal|UpVector)*UpVector).GetSafeNormal();
+			const FVector Adjust = UMovementComponent::ComputeSlideVector(RemainderXY, 1.f, NormalXY, Hit);
+			Result += Adjust;
+		}
+	}
+
+	return Result;
+}
+
+void UHynmersMovementComponent::TwoWallAdjust(FVector & Delta, const FHitResult & Hit, const FVector & OldHitNormal) const
+{
+	const FVector InDelta = Delta;
+
+	const FVector HitNormal = Hit.Normal;
+
+	if ((OldHitNormal | HitNormal) <= 0.f) //90 or less corner, so use cross product for direction
+	{
+		const FVector DesiredDir = Delta;
+		FVector NewDir = (HitNormal ^ OldHitNormal);
+		NewDir = NewDir.GetSafeNormal();
+		Delta = (Delta | NewDir) * (1.f - Hit.Time) * NewDir;
+		if ((DesiredDir | Delta) < 0.f)
+		{
+			Delta = -1.f * Delta;
+		}
+	}
+	else //adjust to new wall
+	{
+		const FVector DesiredDir = Delta;
+		Delta = UMovementComponent::ComputeSlideVector(Delta, 1.f - Hit.Time, HitNormal, Hit);
+		if ((Delta | DesiredDir) <= 0.f)
+		{
+			Delta = FVector::ZeroVector;
+		}
+		else if (FMath::Abs((HitNormal | OldHitNormal) - 1.f) < KINDA_SMALL_NUMBER)
+		{
+			// we hit the same wall again even after adjusting to move along it the first time
+			// nudge away from it (this can happen due to precision issues)
+			Delta += HitNormal * 0.01f;
+		}
+	}
+	
+	if (IsMovingOnGround())
+	{
+		// Allow slides up walkable surfaces, but not unwalkable ones (treat those as vertical barriers).
+		if ((Delta | UpVector) > 0.f)
+		{
+			if (((Hit.Normal | UpVector) >= GetWalkableFloorZ() || IsWalkable(Hit)) && (Hit.Normal | UpVector) > KINDA_SMALL_NUMBER)
+			{
+				// Maintain horizontal velocity
+				const float Time = (1.f - Hit.Time);
+				const FVector ScaledDelta = Delta.GetSafeNormal() * InDelta.Size();
+				Delta = ((InDelta | ForwardVector)*ForwardVector + (InDelta | RightVector)*RightVector + ((ScaledDelta | UpVector) / (Hit.Normal | UpVector))*UpVector)*Time;
+			}
+			else
+			{
+				Delta -= (Delta | UpVector)*UpVector;
+			}
+		}
+		else if ((Delta | UpVector) < 0.f)
+		{
+			// Don't push down into the floor.
+			if (CurrentFloor.FloorDist < MIN_FLOOR_DIST && CurrentFloor.bBlockingHit)
+			{
+				Delta -= (Delta | UpVector)*UpVector;
+			}
+		}
+	}
+}
