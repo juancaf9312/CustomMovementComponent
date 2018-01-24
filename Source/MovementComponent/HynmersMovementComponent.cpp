@@ -182,9 +182,9 @@ void UHynmersMovementComponent::TickComponent(float DeltaTime, enum ELevelTick T
 	const FVector InputVector = ConsumeInputVector();
 	UpVector = UpdatedComponent->GetUpVector();
 
-	if ((CurrentFloor.HitResult.ImpactNormal | UpVector) >= KINDA_SMALL_NUMBER) {
+	if (FVector::CrossProduct(CurrentFloor.HitResult.ImpactNormal, UpVector).Size() >= KINDA_SMALL_NUMBER) {
 		FVector AxisToRotate = FVector::CrossProduct(UpVector , CurrentFloor.HitResult.ImpactNormal);
-		FQuat DeltaRotation(UKismetMathLibrary::RotatorFromAxisAndAngle(AxisToRotate, AngularVelocity*DeltaTime));
+		FQuat DeltaRotation(UKismetMathLibrary::RotatorFromAxisAndAngle(AxisToRotate, FMath::Min(AngularVelocity*DeltaTime, UKismetMathLibrary::DegAsin(AxisToRotate.Size()))));
 
 		UpdatedComponent->AddWorldRotation(DeltaRotation);
 	}
@@ -2202,6 +2202,21 @@ void UHynmersMovementComponent::PhysFalling(float deltaTime, int32 Iterations)
 	}
 }
 
+FVector UHynmersMovementComponent::GetFallingLateralAcceleration(float DeltaTime)
+{
+	// No acceleration in Z
+	FVector FallAcceleration = (Acceleration | ForwardVector)*ForwardVector + (Acceleration | RightVector)*RightVector;
+
+	// bound acceleration, falling object has minimal ability to impact acceleration
+	if (!HasAnimRootMotion() && FallAcceleration.SizeSquared() > 0.f)
+	{
+		FallAcceleration = GetAirControl(DeltaTime, AirControl, FallAcceleration);
+		FallAcceleration = FallAcceleration.GetClampedToMaxSize(GetMaxAcceleration());
+	}
+
+	return FallAcceleration;
+}
+
 bool UHynmersMovementComponent::DoJump(bool bReplayingMoves)
 {
 	UE_LOG(LogTemp, Warning, TEXT("JUMP_TIME: %d"), GetWorld()->GetTimeSeconds())
@@ -2219,6 +2234,17 @@ bool UHynmersMovementComponent::DoJump(bool bReplayingMoves)
 	return false;
 }
 
+float UHynmersMovementComponent::BoostAirControl(float DeltaTime, float TickAirControl, const FVector & FallAcceleration)
+{
+	UE_LOG(LogTemp, Warning, TEXT("Im in BoostAirControl"))
+	if (AirControlBoostMultiplier > 0.f && (Velocity-(Velocity | UpVector)*UpVector).SizeSquared() < FMath::Square(AirControlBoostVelocityThreshold))
+	{
+		TickAirControl = FMath::Min(1.f, AirControlBoostMultiplier * TickAirControl);
+	}
+
+	return TickAirControl;
+}
+
 void UHynmersMovementComponent::ProcessLanded(const FHitResult & Hit, float remainingTime, int32 Iterations)
 {
 	UE_LOG(LogTemp, Warning, TEXT("Im Landing"))
@@ -2233,6 +2259,59 @@ void UHynmersMovementComponent::ProcessLanded(const FHitResult & Hit, float rema
 	}
 
 	StartNewPhysics(remainingTime, Iterations);
+}
+
+bool UHynmersMovementComponent::IsValidLandingSpot(const FVector & CapsuleLocation, const FHitResult & Hit) const
+{
+	if (!Hit.bBlockingHit)
+	{
+		return false;
+	}
+
+	// Skip some checks if penetrating. Penetration will be handled by the FindFloor call (using a smaller capsule)
+	if (!Hit.bStartPenetrating)
+	{
+		// Reject unwalkable floor normals.
+		if (!IsWalkable(Hit))
+		{
+			return false;
+		}
+
+		float PawnRadius, PawnHalfHeight;
+		CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleSize(PawnRadius, PawnHalfHeight);
+
+		// Reject hits that are above our lower hemisphere (can happen when sliding down a vertical surface).
+		const float LowerHemisphereZ = (Hit.Location | UpVector) - PawnHalfHeight + PawnRadius;
+		if ((Hit.ImpactPoint | UpVector) >= LowerHemisphereZ)
+		{
+			return false;
+		}
+
+		// Reject hits that are barely on the cusp of the radius of the capsule
+		if (!IsWithinEdgeTolerance(Hit.Location, Hit.ImpactPoint, PawnRadius))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		// Penetrating
+		if ((Hit.Normal | UpVector) < KINDA_SMALL_NUMBER)
+		{
+			// Normal is nearly horizontal or downward, that's a penetration adjustment next to a vertical or overhanging wall. Don't pop to the floor.
+			return false;
+		}
+	}
+
+	FFindFloorResult FloorResult;
+	FindFloor(CapsuleLocation, FloorResult, false, &Hit);
+
+	if (!FloorResult.IsWalkableFloor())
+	{
+		return false;
+	}
+
+	return true;
 }
 
 void UHynmersMovementComponent::SetPostLandedPhysics(const FHitResult & Hit)

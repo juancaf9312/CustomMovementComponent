@@ -78,9 +78,15 @@ public:
 
 	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
 
-	virtual bool DoJump(bool bReplayingMoves) override;
+	virtual FVector GetFallingLateralAcceleration(float DeltaTime) override;
+
+	virtual bool DoJump(bool bReplayingMoves) override;	
+	
+	virtual float BoostAirControl(float DeltaTime, float TickAirControl, const FVector& FallAcceleration) override;
 
 	virtual void ProcessLanded(const FHitResult& Hit, float remainingTime, int32 Iterations) override;
+
+	virtual bool IsValidLandingSpot(const FVector& CapsuleLocation, const FHitResult& Hit) const override;
 
 	virtual void SetPostLandedPhysics(const FHitResult& Hit) override;
 
