@@ -17,8 +17,7 @@ class MOVEMENTCOMPONENT_API UHynmersMovementComponent : public UCharacterMovemen
 /*Revision:
 	TickComponent
 		PerformMovement
-			PhysWalking
-				GetLedgeMove
+			PhysFalling
 */
 public:
 
@@ -62,12 +61,6 @@ public:
 
 	virtual float SlideAlongSurface(const FVector& Delta, float Time, const FVector& Normal, FHitResult& Hit, bool bHandleImpact) override;
 
-	virtual void PhysSwimming(float deltaTime, int32 Iterations) override;
-
-	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
-
-	virtual bool DoJump(bool bReplayingMoves) override;
-
 	// Floor Finding functions
 	virtual void FindFloor(const FVector& CapsuleLocation, FFindFloorResult& OutFloorResult, bool bZeroDelta, const FHitResult* DownwardSweepResult = NULL) const override;
 
@@ -78,10 +71,18 @@ public:
 
 	virtual bool IsWalkable(const FHitResult& Hit) const override;
 
+	virtual void PhysSwimming(float deltaTime, int32 Iterations) override;
+
+	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
+
+	virtual bool DoJump(bool bReplayingMoves) override;
+
 	// Angular velocity in degrees per second
 	UPROPERTY(Category = "Character Movement: Walking", EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", UIMin = "0"))
 		float AngularVelocity = 5;
 
 private:
 	FVector UpVector;
+	FVector RightVector;
+	FVector ForwardVector;
 };
