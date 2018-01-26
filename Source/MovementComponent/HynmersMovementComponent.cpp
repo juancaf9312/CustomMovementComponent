@@ -13,6 +13,7 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/NetworkObjectList.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Components/BrushComponent.h"
 
 DECLARE_CYCLE_STAT(TEXT("Char Tick"), STAT_CharacterMovementTick, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char NonSimulated Time"), STAT_CharacterMovementNonSimulated, STATGROUP_Character);
@@ -28,6 +29,7 @@ DECLARE_CYCLE_STAT(TEXT("Char StepUp"), STAT_CharStepUp, STATGROUP_Character);
 DECLARE_CYCLE_STAT(TEXT("Char AdjustFloorHeight"), STAT_CharAdjustFloorHeight, STATGROUP_Character);
 
 const float MAX_STEP_SIDE_Z = 0.08f;	// maximum z value for the normal on the vertical side of steps
+const float SWIMBOBSPEED = -80.f;
 const float VERTICAL_SLOPE_NORMAL_Z = 0.001f; // Slope is vertical if Abs(Normal.Z) <= this threshold. Accounts for precision problems that sometimes angle normals slightly off horizontal for vertical surface.
 
 UHynmersMovementComponent::UHynmersMovementComponent() 
@@ -1822,126 +1824,6 @@ bool UHynmersMovementComponent::IsWalkable(const FHitResult & Hit) const
 	return true;
 }
 
-void UHynmersMovementComponent::PhysSwimming(float deltaTime, int32 Iterations)
-{
-	if (deltaTime < MIN_TICK_TIME)
-	{
-		return;
-	}
-
-	RestorePreAdditiveRootMotionVelocity();
-
-	float NetFluidFriction = 0.f;
-	float Depth = ImmersionDepth();
-	float NetBuoyancy = Buoyancy * Depth;
-	float OriginalAccelZ = Acceleration.Z;
-	bool bLimitedUpAccel = false;
-
-	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && (Velocity.Z > 0.33f * MaxSwimSpeed) && (NetBuoyancy != 0.f))
-	{
-		//damp positive Z out of water
-		Velocity.Z = FMath::Max(0.33f * MaxSwimSpeed, Velocity.Z * Depth*Depth);
-	}
-	else if (Depth < 0.65f)
-	{
-		bLimitedUpAccel = (Acceleration.Z > 0.f);
-		Acceleration.Z = FMath::Min(0.1f, Acceleration.Z);
-	}
-
-	Iterations++;
-	FVector OldLocation = UpdatedComponent->GetComponentLocation();
-	bJustTeleported = false;
-	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
-	{
-		const float Friction = 0.5f * GetPhysicsVolume()->FluidFriction * Depth;
-		CalcVelocity(deltaTime, Friction, true, GetMaxBrakingDeceleration());
-		Velocity.Z += GetGravityZ() * deltaTime * (1.f - NetBuoyancy);
-	}
-
-	ApplyRootMotionToVelocity(deltaTime);
-
-	FVector Adjusted = Velocity * deltaTime;
-	FHitResult Hit(1.f);
-	float remainingTime = deltaTime * Swim(Adjusted, Hit);
-
-	//may have left water - if so, script might have set new physics mode
-	if (!IsSwimming())
-	{
-		StartNewPhysics(remainingTime, Iterations);
-		return;
-	}
-
-	if (Hit.Time < 1.f && CharacterOwner)
-	{
-		HandleSwimmingWallHit(Hit, deltaTime);
-		if (bLimitedUpAccel && (Velocity.Z >= 0.f))
-		{
-			// allow upward velocity at surface if against obstacle
-			Velocity.Z += OriginalAccelZ * deltaTime;
-			Adjusted = Velocity * (1.f - Hit.Time)*deltaTime;
-			Swim(Adjusted, Hit);
-			if (!IsSwimming())
-			{
-				StartNewPhysics(remainingTime, Iterations);
-				return;
-			}
-		}
-
-		const FVector GravDir = FVector(0.f, 0.f, -1.f);
-		const FVector VelDir = Velocity.GetSafeNormal();
-		const float UpDown = GravDir | VelDir;
-
-		bool bSteppedUp = false;
-		if ((FMath::Abs(Hit.ImpactNormal.Z) < 0.2f) && (UpDown < 0.5f) && (UpDown > -0.2f) && CanStepUp(Hit))
-		{
-			float stepZ = UpdatedComponent->GetComponentLocation().Z;
-			const FVector RealVelocity = Velocity;
-			Velocity.Z = 1.f;	// HACK: since will be moving up, in case pawn leaves the water
-			bSteppedUp = StepUp(GravDir, Adjusted * (1.f - Hit.Time), Hit);
-			if (bSteppedUp)
-			{
-				//may have left water - if so, script might have set new physics mode
-				if (!IsSwimming())
-				{
-					StartNewPhysics(remainingTime, Iterations);
-					return;
-				}
-				OldLocation.Z = UpdatedComponent->GetComponentLocation().Z + (OldLocation.Z - stepZ);
-			}
-			Velocity = RealVelocity;
-		}
-
-		if (!bSteppedUp)
-		{
-			//adjust and try again
-			HandleImpact(Hit, deltaTime, Adjusted);
-			SlideAlongSurface(Adjusted, (1.f - Hit.Time), Hit.Normal, Hit, true);
-		}
-	}
-
-	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && !bJustTeleported && ((deltaTime - remainingTime) > KINDA_SMALL_NUMBER) && CharacterOwner)
-	{
-		bool bWaterJump = !GetPhysicsVolume()->bWaterVolume;
-		float velZ = Velocity.Z;
-		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / (deltaTime - remainingTime);
-		if (bWaterJump)
-		{
-			Velocity.Z = velZ;
-		}
-	}
-
-	if (!GetPhysicsVolume()->bWaterVolume && IsSwimming())
-	{
-		SetMovementMode(MOVE_Falling); //in case script didn't change it (w/ zone change)
-	}
-
-	//may have left water - if so, script might have set new physics mode
-	if (!IsSwimming())
-	{
-		StartNewPhysics(remainingTime, Iterations);
-	}
-}
-
 void UHynmersMovementComponent::PhysFalling(float deltaTime, int32 Iterations)
 {
 	SCOPE_CYCLE_COUNTER(STAT_CharPhysFalling);
@@ -2129,7 +2011,6 @@ void UHynmersMovementComponent::PhysFalling(float deltaTime, int32 Iterations)
 						}
 
 						FVector PreTwoWallDelta = Delta;
-						// TODO Change TwoWallAdjust
 						TwoWallAdjust(Delta, Hit, OldHitNormal);
 
 						// Limit air control, but allow a slide along the second wall.
@@ -2462,3 +2343,190 @@ void UHynmersMovementComponent::TwoWallAdjust(FVector & Delta, const FHitResult 
 		}
 	}
 }
+
+void UHynmersMovementComponent::PhysSwimming(float deltaTime, int32 Iterations)
+{
+	if (deltaTime < MIN_TICK_TIME)
+	{
+		return;
+	}
+
+	RestorePreAdditiveRootMotionVelocity();
+
+	float NetFluidFriction = 0.f;
+	float Depth = ImmersionDepth();
+	float NetBuoyancy = Buoyancy * Depth;
+	float OriginalAccelZ = (Acceleration | UpVector);
+	bool bLimitedUpAccel = false;
+
+	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && ((Velocity | UpVector) > 0.33f * MaxSwimSpeed) && (NetBuoyancy != 0.f))
+	{
+		//damp positive Z out of water
+		Velocity = (Velocity*ForwardVector)*ForwardVector + (Velocity | RightVector)*RightVector + FMath::Max(0.33f * MaxSwimSpeed, (Velocity | UpVector) * Depth*Depth)*UpVector;
+	}
+	else if (Depth < 0.65f)
+	{
+		bLimitedUpAccel = ((Acceleration | UpVector) > 0.f);
+		Acceleration = Acceleration - (Acceleration | UpVector)*UpVector + FMath::Min(0.1f, (Acceleration | UpVector))*UpVector;
+	}
+
+	Iterations++;
+	FVector OldLocation = UpdatedComponent->GetComponentLocation();
+	bJustTeleported = false;
+	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
+	{
+		const float Friction = 0.5f * GetPhysicsVolume()->FluidFriction * Depth;
+		CalcVelocity(deltaTime, Friction, true, GetMaxBrakingDeceleration());
+		Velocity += (GetGravityZ() * deltaTime * (1.f - NetBuoyancy))*UpVector;
+	}
+
+	ApplyRootMotionToVelocity(deltaTime);
+
+	FVector Adjusted = Velocity * deltaTime;
+	FHitResult Hit(1.f);
+	float remainingTime = deltaTime * Swim(Adjusted, Hit);
+
+	//may have left water - if so, script might have set new physics mode
+	if (!IsSwimming())
+	{
+		StartNewPhysics(remainingTime, Iterations);
+		return;
+	}
+
+	if (Hit.Time < 1.f && CharacterOwner)
+	{
+		HandleSwimmingWallHit(Hit, deltaTime);
+		if (bLimitedUpAccel && ((Velocity | UpVector)>= 0.f))
+		{
+			// allow upward velocity at surface if against obstacle
+			Velocity += OriginalAccelZ * deltaTime*UpVector;
+			Adjusted = Velocity * (1.f - Hit.Time)*deltaTime;
+			Swim(Adjusted, Hit);
+			if (!IsSwimming())
+			{
+				StartNewPhysics(remainingTime, Iterations);
+				return;
+			}
+		}
+
+		const FVector GravDir = -UpVector;
+		const FVector VelDir = Velocity.GetSafeNormal();
+		const float UpDown = GravDir | VelDir;
+
+		bool bSteppedUp = false;
+		if ((FMath::Abs((Hit.ImpactNormal | UpVector)) < 0.2f) && (UpDown < 0.5f) && (UpDown > -0.2f) && CanStepUp(Hit))
+		{
+			float stepZ = (UpdatedComponent->GetComponentLocation() | UpVector);
+			const FVector RealVelocity = Velocity;
+			Velocity = Velocity - (Velocity | UpVector)*UpVector + UpVector;	// HACK: since will be moving up, in case pawn leaves the water
+			bSteppedUp = StepUp(GravDir, Adjusted * (1.f - Hit.Time), Hit);
+			if (bSteppedUp)
+			{
+				//may have left water - if so, script might have set new physics mode
+				if (!IsSwimming())
+				{
+					StartNewPhysics(remainingTime, Iterations);
+					return;
+				}
+				OldLocation += ((UpdatedComponent->GetComponentLocation() | UpVector) + ((OldLocation | UpVector) - stepZ) - (OldLocation | UpVector))*UpVector;
+			}
+			Velocity = RealVelocity;
+		}
+
+		if (!bSteppedUp)
+		{
+			//adjust and try again
+			HandleImpact(Hit, deltaTime, Adjusted);
+			SlideAlongSurface(Adjusted, (1.f - Hit.Time), Hit.Normal, Hit, true);
+		}
+	}
+
+	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && !bJustTeleported && ((deltaTime - remainingTime) > KINDA_SMALL_NUMBER) && CharacterOwner)
+	{
+		bool bWaterJump = !GetPhysicsVolume()->bWaterVolume;
+		float velZ = (Velocity | UpVector);
+		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / (deltaTime - remainingTime);
+		if (bWaterJump)
+		{
+			Velocity += (velZ - (Velocity | UpVector))*UpVector;
+		}
+	}
+
+	if (!GetPhysicsVolume()->bWaterVolume && IsSwimming())
+	{
+		SetMovementMode(MOVE_Falling); //in case script didn't change it (w/ zone change)
+	}
+
+	//may have left water - if so, script might have set new physics mode
+	if (!IsSwimming())
+	{
+		StartNewPhysics(remainingTime, Iterations);
+	}
+}
+
+void UHynmersMovementComponent::StartSwimming(FVector OldLocation, FVector OldVelocity, float timeTick, float remainingTime, int32 Iterations)
+{
+	if (remainingTime < MIN_TICK_TIME || timeTick < MIN_TICK_TIME)
+	{
+		return;
+	}
+
+	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && !bJustTeleported)
+	{
+		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / timeTick; //actual average velocity
+		Velocity = 2.f*Velocity - OldVelocity; //end velocity has 2* accel of avg
+		Velocity = Velocity.GetClampedToMaxSize(GetPhysicsVolume()->TerminalVelocity);
+	}
+	const FVector End = FindWaterLine(UpdatedComponent->GetComponentLocation(), OldLocation);
+	float waterTime = 0.f;
+	if (End != UpdatedComponent->GetComponentLocation())
+	{
+		const float ActualDist = (UpdatedComponent->GetComponentLocation() - OldLocation).Size();
+		if (ActualDist > KINDA_SMALL_NUMBER)
+		{
+			waterTime = timeTick * (End - UpdatedComponent->GetComponentLocation()).Size() / ActualDist;
+			remainingTime += waterTime;
+		}
+		MoveUpdatedComponent(End - UpdatedComponent->GetComponentLocation(), UpdatedComponent->GetComponentQuat(), true);
+	}
+	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && ((Velocity | UpVector) > 2.f*SWIMBOBSPEED) && ((Velocity | UpVector) < 0.f)) //allow for falling out of water
+	{
+		Velocity = (Velocity - (Velocity | UpVector)*UpVector) + (SWIMBOBSPEED - (Velocity - (Velocity | UpVector)*UpVector).Size() * 0.7f)*UpVector; //smooth bobbing
+	}
+	if ((remainingTime >= MIN_TICK_TIME) && (Iterations < MaxSimulationIterations))
+	{
+		PhysSwimming(remainingTime, Iterations);
+	}
+}
+
+float UHynmersMovementComponent::ImmersionDepth() const
+{
+	float depth = 0.f;
+
+	if (CharacterOwner && GetPhysicsVolume()->bWaterVolume)
+	{
+		const float CollisionHalfHeight = CharacterOwner->GetSimpleCollisionHalfHeight();
+
+		if ((CollisionHalfHeight == 0.f) || (Buoyancy == 0.f))
+		{
+			depth = 1.f;
+		}
+		else
+		{
+			UBrushComponent* VolumeBrushComp = GetPhysicsVolume()->GetBrushComponent();
+			FHitResult Hit(1.f);
+			if (VolumeBrushComp)
+			{
+				const FVector TraceStart = UpdatedComponent->GetComponentLocation() + CollisionHalfHeight * UpVector;
+				const FVector TraceEnd = UpdatedComponent->GetComponentLocation() - CollisionHalfHeight * UpVector;
+
+				FCollisionQueryParams NewTraceParams(SCENE_QUERY_STAT(ImmersionDepth), true);
+				VolumeBrushComp->LineTraceComponent(Hit, TraceStart, TraceEnd, NewTraceParams);
+			}
+
+			depth = (Hit.Time == 1.f) ? 1.f : (1.f - Hit.Time);
+		}
+	}
+	return depth;
+}
+

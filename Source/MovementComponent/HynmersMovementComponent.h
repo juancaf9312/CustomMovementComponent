@@ -17,10 +17,7 @@ class MOVEMENTCOMPONENT_API UHynmersMovementComponent : public UCharacterMovemen
 /*Revision:
 	TickComponent
 		PerformMovement
-			PhysFalling
-				ProcessLanded
-					ComputeSlideVector
-						HandleSlopeBoosting
+			PhysSwimming
 */
 public:
 
@@ -74,8 +71,6 @@ public:
 
 	virtual bool IsWalkable(const FHitResult& Hit) const override;
 
-	virtual void PhysSwimming(float deltaTime, int32 Iterations) override;
-
 	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
 
 	virtual FVector GetFallingLateralAcceleration(float DeltaTime) override;
@@ -96,9 +91,15 @@ public:
 
 	virtual void TwoWallAdjust(FVector& Delta, const FHitResult& Hit, const FVector& OldHitNormal) const override;
 
+	virtual void PhysSwimming(float deltaTime, int32 Iterations) override;
+
+	void StartSwimming(FVector OldLocation, FVector OldVelocity, float timeTick, float remainingTime, int32 Iterations);
+
+	virtual float ImmersionDepth() const override;
+
 	// Angular velocity in degrees per second
 	UPROPERTY(Category = "Character Movement: Walking", EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", UIMin = "0"))
-		float AngularVelocity = 5;
+		float AngularVelocity = 90.f;
 
 private:
 	FVector UpVector;
