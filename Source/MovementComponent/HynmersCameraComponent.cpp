@@ -6,6 +6,8 @@
 #include "GameFramework/Controller.h"
 #include "Engine/Engine.h"
 #include "IHeadMountedDisplay.h"
+#include "IXRTrackingSystem.h"
+#include "IXRCamera.h"
 #include "OculusFunctionLibrary.h"
 
 void UHynmersCameraComponent::BeginPlay() {
@@ -20,9 +22,13 @@ void UHynmersCameraComponent::BeginPlay() {
 	
 
 	FVector Offset;
-	if (bLockToHmd && GEngine->HMDDevice.IsValid() && GEngine->HMDDevice->IsHeadTrackingAllowed() && GetWorld()->WorldType != EWorldType::Editor) {
+	if (bLockToHmd && GEngine->XRSystem.IsValid() && GetWorld()->WorldType != EWorldType::Editor && GEngine) {
 
-		GEngine->HMDDevice->UpdatePlayerCamera(StartHMDOrientation, Offset);
+		auto XRSystem = GEngine->XRSystem.Get();
+
+		XRCamera = XRSystem->GetXRCamera();
+
+		XRCamera->UpdatePlayerCamera(StartHMDOrientation, Offset);
 		Parent->SetWorldRotation(FRotator(Parent->GetComponentRotation().Pitch, StartHMDOrientation.Rotator().Yaw, StartHMDOrientation.Rotator().Roll));
 		UE_LOG(LogTemp, Warning, TEXT("%s"), *StartHMDOrientation.Rotator().ToString())
 	}
@@ -31,15 +37,15 @@ void UHynmersCameraComponent::BeginPlay() {
 
 void UHynmersCameraComponent::GetCameraView(float DeltaTime, FMinimalViewInfo& DesiredView) {
 
-	if (bLockToHmd && GEngine->HMDDevice.IsValid() && GEngine->HMDDevice->IsHeadTrackingAllowed() && GetWorld()->WorldType != EWorldType::Editor)
+	if (bLockToHmd && GEngine->XRSystem.IsValid() && GEngine->XRSystem.Get()->IsHeadTrackingAllowed() && GetWorld()->WorldType != EWorldType::Editor)
 	{
 		const FTransform ParentWorld = CalcNewComponentToWorld(FTransform());
-		GEngine->HMDDevice->SetupLateUpdate(ParentWorld, this);
+		XRCamera->SetupLateUpdate(ParentWorld, this);
 
 		FQuat Orientation;
 		FVector Position;
 		FRotator OculusOrientation;
-		if (GEngine->HMDDevice->UpdatePlayerCamera(Orientation, Position))
+		if (XRCamera->UpdatePlayerCamera(Orientation, Position))
 		{
 			FQuat DeltaRotation = StartHMDOrientation.Inverse() * Orientation;
 			UE_LOG(LogTemp, Warning, TEXT("%s"), *DeltaRotation.Rotator().ToString());

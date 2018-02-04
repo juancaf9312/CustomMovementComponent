@@ -19,6 +19,8 @@ private:
 
 	FQuat StartHMDOrientation;
 
+	TSharedPtr<class IXRCamera, ESPMode::ThreadSafe> XRCamera;
+
 public:
 	virtual void BeginPlay() override;
 
